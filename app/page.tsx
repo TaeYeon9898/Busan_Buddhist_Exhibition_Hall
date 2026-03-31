@@ -338,8 +338,6 @@ export default function Home() {
 
   const tabs = [
     { id: 'stock', label: '재고 현황' },
-    { id: 'lowstock', label: `재고 부족 ${lowStockItems}건` },
-    { id: 'pending', label: `미입고 ${totalPending}건` },
     { id: 'in', label: '입고 내역' },
     { id: 'out', label: '출고 내역' },
     { id: 'return', label: '반품 내역' },
@@ -384,15 +382,15 @@ export default function Home() {
 
       {/* 요약 카드 */}
       <div className="grid grid-cols-3 gap-4 mb-8">
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div onClick={() => changeTab('stock')} className="bg-blue-50 border border-blue-200 rounded-lg p-4 cursor-pointer hover:shadow-md transition-shadow">
           <p className="text-sm text-blue-600">전체 품목 수</p>
           <p className="text-3xl font-bold text-blue-800">{totalItems}</p>
         </div>
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <div onClick={() => changeTab('lowstock')} className="bg-red-50 border border-red-200 rounded-lg p-4 cursor-pointer hover:shadow-md transition-shadow">
           <p className="text-sm text-red-600">재고 부족 품목</p>
           <p className="text-3xl font-bold text-red-800">{lowStockItems}</p>
         </div>
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+        <div onClick={() => changeTab('pending')} className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 cursor-pointer hover:shadow-md transition-shadow">
           <p className="text-sm text-yellow-600">미입고 건수</p>
           <p className="text-3xl font-bold text-yellow-800">{totalPending}</p>
         </div>
@@ -770,7 +768,7 @@ export default function Home() {
               <XAxis type="number" unit="%" domain={[0, 100]} />
               <YAxis type="category" dataKey="name" />
               <Tooltip formatter={(value) => [`${value}%`, '미입고율']} />
-              <Bar dataKey="미입고율" fill="#f97316" label={{ position: 'right', formatter: (v: unknown) => `${v}%`, fontSize: 12 }} />
+              <Bar dataKey="미입고율" fill="#f97316" label={{ position: 'right', formatter: (v: number) => `${v}%`, fontSize: 12 }} />
             </BarChart>
           </ResponsiveContainer>
 
