@@ -526,7 +526,7 @@ export default function Home() {
                 cx="50%"
                 cy="50%"
                 outerRadius={130}
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
               >
                 {getCategoryStockChart().map((_, index) => (
                   <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
