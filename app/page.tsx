@@ -4,10 +4,10 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
 export default function Home() {
-  const [stockData, setStockData] = useState([])
-  const [inData, setInData] = useState([])
-  const [outData, setOutData] = useState([])
-  const [returnData, setReturnData] = useState([])
+  const [stockData, setStockData] = useState<any[]>([])
+  const [inData, setInData] = useState<any[]>([])
+  const [outData, setOutData] = useState<any[]>([])
+  const [returnData, setReturnData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('stock')
 
