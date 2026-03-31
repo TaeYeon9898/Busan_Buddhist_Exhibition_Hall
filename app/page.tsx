@@ -768,7 +768,7 @@ export default function Home() {
               <XAxis type="number" unit="%" domain={[0, 100]} />
               <YAxis type="category" dataKey="name" />
               <Tooltip formatter={(value) => [`${value}%`, '미입고율']} />
-              <Bar dataKey="미입고율" fill="#f97316" label={{ position: 'right', formatter: (v: number) => `${v}%`, fontSize: 12 }} />
+              <Bar dataKey="미입고율" fill="#f97316" label={{ position: 'right', formatter: (v: unknown) => `${v}%`, fontSize: 12 }} />
             </BarChart>
           </ResponsiveContainer>
 
