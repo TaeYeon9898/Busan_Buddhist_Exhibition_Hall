@@ -27,6 +27,7 @@ export default function Home() {
 
   const [selectedCategoryForOut, setSelectedCategoryForOut] = useState('')
   const [selectedCategoryForStock, setSelectedCategoryForStock] = useState('')
+  const [selectedCategoryForTurnover, setSelectedCategoryForTurnover] = useState('')
 
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 50
@@ -110,16 +111,16 @@ export default function Home() {
       .slice(0, 10)
   }
 
-  // ─── 품목별 회전율 (상품명 기준) ──────────────────────────────────────────
-  function getTurnoverChart() {
+  // ─── 분류별 재고 회전율 Top10 ─────────────────────────────────────────────
+  function getTurnoverChart(category: string) {
     return stockData
-      .filter((item) => (item.in_total || 0) > 0)
+      .filter((item) => (item.in_total || 0) > 0 && (item.category || '') === category)
       .map((item) => ({
         name: item.product_name || item.seller_code || item.code || '미등록',
         회전율: parseFloat(((item.out_total || 0) / (item.in_total || 1)).toFixed(2)),
       }))
       .sort((a, b) => b.회전율 - a.회전율)
-      .slice(0, 15)
+      .slice(0, 10)
   }
 
   // ─── 기간 비교 카드 ───────────────────────────────────────────────────────
@@ -751,18 +752,46 @@ export default function Home() {
             })()
           )}
 
-          {/* 품목별 재고 회전율 Top 15 (상품명 기준) */}
-          <h2 className="text-lg font-semibold mt-12 mb-4">품목별 재고 회전율 Top 15</h2>
+          {/* 분류별 재고 회전율 Top10 */}
+          <h2 className="text-lg font-semibold mt-12 mb-3">분류별 재고 회전율 Top 10</h2>
           <p className="text-xs text-gray-400 mb-3">※ 회전율 = 출고합계 ÷ 입고합계. 1에 가까울수록 입고한 만큼 출고된 것입니다.</p>
-          <ResponsiveContainer width="100%" height={450}>
-            <BarChart data={getTurnoverChart()} layout="vertical" margin={{ top: 10, right: 60, left: 160, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" domain={[0, 'auto']} />
-              <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 12 }} />
-              <Tooltip formatter={(value) => [value, '회전율']} />
-              <Bar dataKey="회전율" fill="#8b5cf6" label={{ position: 'right', fontSize: 12 }} />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="flex items-center gap-3 mb-4">
+            <label className="text-sm text-gray-600">분류 선택</label>
+            <select
+              value={selectedCategoryForTurnover}
+              onChange={(e) => setSelectedCategoryForTurnover(e.target.value)}
+              className="border border-gray-300 rounded px-3 py-2 text-sm"
+            >
+              <option value="">-- 분류를 선택하세요 --</option>
+              {allCategories.map((cat) => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+          </div>
+          {selectedCategoryForTurnover === '' ? (
+            <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">
+              분류를 선택하면 해당 분류의 재고 회전율 Top 10이 표시됩니다.
+            </p>
+          ) : (
+            (() => {
+              const turnoverData = getTurnoverChart(selectedCategoryForTurnover)
+              return turnoverData.length === 0 ? (
+                <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">
+                  해당 분류의 회전율 데이터가 없습니다.
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height={Math.max(300, turnoverData.length * 45)}>
+                  <BarChart data={turnoverData} layout="vertical" margin={{ top: 10, right: 60, left: 160, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type="number" domain={[0, 'auto']} />
+                    <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 12 }} />
+                    <Tooltip formatter={(value) => [value, '회전율']} />
+                    <Bar dataKey="회전율" fill="#8b5cf6" label={{ position: 'right', fontSize: 12 }} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )
+            })()
+          )}
 
           {/* 재고 소진 예상일 */}
           <h2 className="text-lg font-semibold mt-12 mb-2">재고 소진 예상일 (최근 30일 출고 기준)</h2>
