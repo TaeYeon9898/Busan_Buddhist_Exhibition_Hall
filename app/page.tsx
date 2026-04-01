@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  PieChart, Pie, Cell
+  PieChart, Pie, Cell,
 } from 'recharts'
 
 const PIE_COLORS = ['#3b82f6', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16']
@@ -25,8 +25,8 @@ export default function Home() {
   const [endDate, setEndDate] = useState('')
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
 
-  const [selectedCategoryPie, setSelectedCategoryPie] = useState('')
-  const [selectedCategoryBar, setSelectedCategoryBar] = useState('')
+  const [selectedCategoryForOut, setSelectedCategoryForOut] = useState('')
+  const [selectedCategoryForStock, setSelectedCategoryForStock] = useState('')
 
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 50
@@ -48,31 +48,40 @@ export default function Home() {
     setLoading(false)
   }
 
-  const categoryList = Array.from(new Set(outData.map((item) => item.category).filter(Boolean))).sort()
+  // ─── 분류 목록 (입고+출고+반품 통합) ──────────────────────────────────────
+  function getAllCategories(): string[] {
+    const set = new Set<string>()
+    inData.forEach((item) => { if (item.category) set.add(item.category) })
+    outData.forEach((item) => { if (item.category) set.add(item.category) })
+    returnData.forEach((item) => { if (item.category) set.add(item.category) })
+    return Array.from(set).sort()
+  }
 
+  // ─── 월별 차트 ────────────────────────────────────────────────────────────
   function getMonthlyChart() {
     const months = Array.from({ length: 12 }, (_, i) => ({
       month: `${i + 1}월`, 입고: 0, 출고: 0, 반품: 0,
     }))
     inData.forEach((item) => {
-      const d = new Date(item.order_date)
-      if (d.getFullYear() === selectedYear) months[d.getMonth()].입고 += item.order_qty || 0
+      const date = new Date(item.order_date)
+      if (date.getFullYear() === selectedYear) months[date.getMonth()].입고 += item.order_qty || 0
     })
     outData.forEach((item) => {
-      const d = new Date(item.out_date)
-      if (d.getFullYear() === selectedYear) months[d.getMonth()].출고 += item.out_qty || 0
+      const date = new Date(item.out_date)
+      if (date.getFullYear() === selectedYear) months[date.getMonth()].출고 += item.out_qty || 0
     })
     returnData.forEach((item) => {
-      const d = new Date(item.return_date)
-      if (d.getFullYear() === selectedYear) months[d.getMonth()].반품 += item.return_qty || 0
+      const date = new Date(item.return_date)
+      if (date.getFullYear() === selectedYear) months[date.getMonth()].반품 += item.return_qty || 0
     })
     return months
   }
 
-  function getCategoryPieChart() {
+  // ─── 분류별 재고 현황: 선택 분류 내 품목별 출고 Top10 파이차트 ────────────
+  function getCategoryStockPieChart(category: string) {
     const map: Record<string, number> = {}
     outData.forEach((item) => {
-      if (selectedCategoryPie === '' || item.category === selectedCategoryPie) {
+      if ((item.category || '') === category) {
         const name = item.seller_code || item.code || '기타'
         map[name] = (map[name] || 0) + (item.out_qty || 0)
       }
@@ -83,15 +92,16 @@ export default function Home() {
       .slice(0, 10)
   }
 
-  function getCategoryBarChart() {
+  // ─── 분류별 출고 수량: 선택 분류 내 품목별 출고 Top10 파이차트 (연도 필터) ─
+  function getCategoryOutPieChart(category: string) {
     const map: Record<string, number> = {}
     outData.forEach((item) => {
-      const d = new Date(item.out_date)
-      if (d.getFullYear() === selectedYear) {
-        if (selectedCategoryBar === '' || item.category === selectedCategoryBar) {
-          const name = item.seller_code || item.code || '기타'
-          map[name] = (map[name] || 0) + (item.out_qty || 0)
-        }
+      if (
+        (item.category || '') === category &&
+        new Date(item.out_date).getFullYear() === selectedYear
+      ) {
+        const name = item.seller_code || item.code || '기타'
+        map[name] = (map[name] || 0) + (item.out_qty || 0)
       }
     })
     return Object.entries(map)
@@ -100,17 +110,19 @@ export default function Home() {
       .slice(0, 10)
   }
 
+  // ─── 품목별 회전율 (상품명 기준) ──────────────────────────────────────────
   function getTurnoverChart() {
     return stockData
       .filter((item) => (item.in_total || 0) > 0)
       .map((item) => ({
-        name: item.seller_code || item.code,
+        name: item.product_name || item.seller_code || item.code || '미등록',
         회전율: parseFloat(((item.out_total || 0) / (item.in_total || 1)).toFixed(2)),
       }))
       .sort((a, b) => b.회전율 - a.회전율)
       .slice(0, 15)
   }
 
+  // ─── 기간 비교 카드 ───────────────────────────────────────────────────────
   function getMonthComparison() {
     const now = new Date()
     const thisMonth = now.getMonth()
@@ -119,10 +131,12 @@ export default function Home() {
     const lastMonthYear = thisMonth === 0 ? thisYear - 1 : thisYear
 
     const calc = (data: any[], dateKey: string, qtyKey: string, m: number, y: number) =>
-      data.filter((item) => {
-        const d = new Date(item[dateKey])
-        return d.getMonth() === m && d.getFullYear() === y
-      }).reduce((sum, item) => sum + (item[qtyKey] || 0), 0)
+      data
+        .filter((item) => {
+          const d = new Date(item[dateKey])
+          return d.getMonth() === m && d.getFullYear() === y
+        })
+        .reduce((sum, item) => sum + (item[qtyKey] || 0), 0)
 
     const thisIn = calc(inData, 'order_date', 'order_qty', thisMonth, thisYear)
     const lastIn = calc(inData, 'order_date', 'order_qty', lastMonth, lastMonthYear)
@@ -136,14 +150,16 @@ export default function Home() {
       const p = (((cur - prev) / prev) * 100).toFixed(1)
       return cur >= prev ? `+${p}%` : `${p}%`
     }
+    const isUp = (cur: number, prev: number) => cur >= prev
 
     return [
-      { label: '입고', this: thisIn, last: lastIn, diff: diff(thisIn, lastIn), up: thisIn >= lastIn },
-      { label: '출고', this: thisOut, last: lastOut, diff: diff(thisOut, lastOut), up: thisOut >= lastOut },
-      { label: '반품', this: thisReturn, last: lastReturn, diff: diff(thisReturn, lastReturn), up: thisReturn <= lastReturn },
+      { label: '입고', this: thisIn, last: lastIn, diff: diff(thisIn, lastIn), up: isUp(thisIn, lastIn) },
+      { label: '출고', this: thisOut, last: lastOut, diff: diff(thisOut, lastOut), up: isUp(thisOut, lastOut) },
+      { label: '반품', this: thisReturn, last: lastReturn, diff: diff(thisReturn, lastReturn), up: !isUp(thisReturn, lastReturn) },
     ]
   }
 
+  // ─── 재고 소진 예상일 ─────────────────────────────────────────────────────
   function getDaysUntilStockout() {
     const now = new Date()
     const thirtyDaysAgo = new Date(now)
@@ -163,7 +179,6 @@ export default function Home() {
         const daysLeft = dailyOut > 0 ? Math.floor((item.current_stock || 0) / dailyOut) : null
         return {
           code: item.code,
-          seller_code: item.seller_code || '',
           option: item.option || '',
           category: item.category || '',
           current_stock: item.current_stock || 0,
@@ -176,6 +191,7 @@ export default function Home() {
       .slice(0, 20)
   }
 
+  // ─── 필터 ─────────────────────────────────────────────────────────────────
   const filteredStock = stockData.filter((item) =>
     (searchCode === '' || item.code?.includes(searchCode)) &&
     (searchSellerCode === '' || item.seller_code?.includes(searchSellerCode)) &&
@@ -240,8 +256,11 @@ export default function Home() {
     return (
       <div className="flex justify-center gap-2 mt-4">
         {Array.from({ length: pages }, (_, i) => i + 1).map((page) => (
-          <button key={page} onClick={() => setCurrentPage(page)}
-            className={`px-3 py-1 text-sm rounded ${currentPage === page ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'}`}>
+          <button
+            key={page}
+            onClick={() => setCurrentPage(page)}
+            className={`px-3 py-1 text-sm rounded ${currentPage === page ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'}`}
+          >
             {page}
           </button>
         ))}
@@ -268,8 +287,6 @@ export default function Home() {
 
   const tabs = [
     { id: 'stock', label: '재고 현황' },
-    { id: 'lowstock', label: `재고 부족 ${lowStockItems}건` },
-    { id: 'pending', label: `미입고 ${totalPending}건` },
     { id: 'in', label: '입고 내역' },
     { id: 'out', label: '출고 내역' },
     { id: 'return', label: '반품 내역' },
@@ -307,6 +324,7 @@ export default function Home() {
 
   const monthComparison = getMonthComparison()
   const stockoutData = getDaysUntilStockout()
+  const allCategories = getAllCategories()
   const now = new Date()
   const thisMonthLabel = `${now.getMonth() + 1}월`
   const lastMonthLabel = now.getMonth() === 0 ? '12월' : `${now.getMonth()}월`
@@ -343,7 +361,7 @@ export default function Home() {
         ))}
       </div>
 
-      {/* 재고 현황 */}
+      {/* ── 재고 현황 ─────────────────────────────────────────────────────── */}
       {activeTab === 'stock' && (
         <section>
           {filterUI(true, false)}
@@ -384,7 +402,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* 재고 부족 */}
+      {/* ── 재고 부족 (카드 클릭 진입) ──────────────────────────────────────── */}
       {activeTab === 'lowstock' && (
         <section>
           {filterUI(true, false)}
@@ -421,7 +439,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* 미입고 */}
+      {/* ── 미입고 (카드 클릭 진입) ──────────────────────────────────────────── */}
       {activeTab === 'pending' && (
         <section>
           {filterUI(true, true)}
@@ -464,7 +482,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* 입고 내역 */}
+      {/* ── 입고 내역 ─────────────────────────────────────────────────────── */}
       {activeTab === 'in' && (
         <section>
           {filterUI(true, true)}
@@ -507,7 +525,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* 출고 내역 */}
+      {/* ── 출고 내역 ─────────────────────────────────────────────────────── */}
       {activeTab === 'out' && (
         <section>
           {filterUI(false, true)}
@@ -546,7 +564,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* 반품 내역 */}
+      {/* ── 반품 내역 ─────────────────────────────────────────────────────── */}
       {activeTab === 'return' && (
         <section>
           {filterUI(false, true)}
@@ -585,7 +603,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* 통계 */}
+      {/* ── 통계 탭 ───────────────────────────────────────────────────────── */}
       {activeTab === 'chart' && (
         <section>
           <div className="flex items-center gap-4 mb-8">
@@ -599,15 +617,19 @@ export default function Home() {
             </select>
           </div>
 
-          {/* 이번달 vs 지난달 */}
-          <h2 className="text-lg font-semibold mb-4">이번 달 ({thisMonthLabel}) vs 지난달 ({lastMonthLabel}) 비교</h2>
+          {/* 이번 달 vs 지난달 비교 카드 */}
+          <h2 className="text-lg font-semibold mb-4">
+            이번 달 ({thisMonthLabel}) vs 지난달 ({lastMonthLabel}) 비교
+          </h2>
           <div className="grid grid-cols-3 gap-4 mb-10">
             {monthComparison.map((item) => (
               <div key={item.label} className="border rounded-lg p-4 bg-white shadow-sm">
                 <p className="text-sm text-gray-500 mb-1">{item.label}</p>
                 <div className="flex items-end gap-3">
                   <p className="text-2xl font-bold">{item.this.toLocaleString()}</p>
-                  <p className={`text-sm font-medium pb-0.5 ${item.up ? 'text-blue-500' : 'text-red-500'}`}>{item.diff}</p>
+                  <p className={`text-sm font-medium pb-0.5 ${item.up ? 'text-blue-500' : 'text-red-500'}`}>
+                    {item.diff}
+                  </p>
                 </div>
                 <p className="text-xs text-gray-400 mt-1">지난달: {item.last.toLocaleString()}</p>
               </div>
@@ -629,76 +651,127 @@ export default function Home() {
             </BarChart>
           </ResponsiveContainer>
 
-          {/* 분류별 출고 원형 */}
-          <h2 className="text-lg font-semibold mt-12 mb-4">분류별 출고 상위 10 (원형)</h2>
+          {/* 분류별 재고 현황: 콤보박스 → 품목별 출고 Top10 파이차트 */}
+          <h2 className="text-lg font-semibold mt-12 mb-3">분류별 재고 현황</h2>
           <div className="flex items-center gap-3 mb-4">
-            <span className="text-sm">분류 선택</span>
-            <select value={selectedCategoryPie} onChange={(e) => setSelectedCategoryPie(e.target.value)}
-              className="border border-gray-300 rounded px-3 py-2 text-sm">
-              <option value="">전체</option>
-              {categoryList.map((cat) => (
+            <label className="text-sm text-gray-600">분류 선택</label>
+            <select
+              value={selectedCategoryForStock}
+              onChange={(e) => setSelectedCategoryForStock(e.target.value)}
+              className="border border-gray-300 rounded px-3 py-2 text-sm"
+            >
+              <option value="">-- 분류를 선택하세요 --</option>
+              {allCategories.map((cat) => (
                 <option key={cat} value={cat}>{cat}</option>
               ))}
             </select>
           </div>
-          <ResponsiveContainer width="100%" height={350}>
-            <PieChart>
-              <Pie data={getCategoryPieChart()} dataKey="value" nameKey="name"
-                cx="50%" cy="50%" outerRadius={130}
-                label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}>
-                {getCategoryPieChart().map((_, index) => (
-                  <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
+          {selectedCategoryForStock === '' ? (
+            <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">
+              분류를 선택하면 해당 분류의 출고 상위 10개 품목이 표시됩니다.
+            </p>
+          ) : (
+            (() => {
+              const pieData = getCategoryStockPieChart(selectedCategoryForStock)
+              return pieData.length === 0 ? (
+                <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">
+                  해당 분류의 출고 데이터가 없습니다.
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height={380}>
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={140}
+                      label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                    >
+                      {pieData.map((_, index) => (
+                        <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value) => [value, '출고수량']} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              )
+            })()
+          )}
 
-          {/* 분류별 출고 막대 */}
-          <h2 className="text-lg font-semibold mt-12 mb-4">{selectedYear}년 분류별 출고 수량 (막대)</h2>
+          {/* 분류별 출고 수량: 콤보박스 → 품목별 출고 Top10 파이차트 (연도 필터) */}
+          <h2 className="text-lg font-semibold mt-12 mb-3">{selectedYear}년 분류별 출고 수량</h2>
           <div className="flex items-center gap-3 mb-4">
-            <span className="text-sm">분류 선택</span>
-            <select value={selectedCategoryBar} onChange={(e) => setSelectedCategoryBar(e.target.value)}
-              className="border border-gray-300 rounded px-3 py-2 text-sm">
-              <option value="">전체</option>
-              {categoryList.map((cat) => (
+            <label className="text-sm text-gray-600">분류 선택</label>
+            <select
+              value={selectedCategoryForOut}
+              onChange={(e) => setSelectedCategoryForOut(e.target.value)}
+              className="border border-gray-300 rounded px-3 py-2 text-sm"
+            >
+              <option value="">-- 분류를 선택하세요 --</option>
+              {allCategories.map((cat) => (
                 <option key={cat} value={cat}>{cat}</option>
               ))}
             </select>
           </div>
-          <ResponsiveContainer width="100%" height={350}>
-            <BarChart data={getCategoryBarChart()} layout="vertical" margin={{ top: 10, right: 60, left: 150, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" />
-              <YAxis type="category" dataKey="name" width={140} />
-              <Tooltip />
-              <Bar dataKey="value" name="출고수량" fill="#ef4444" />
-            </BarChart>
-          </ResponsiveContainer>
+          {selectedCategoryForOut === '' ? (
+            <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">
+              분류를 선택하면 {selectedYear}년 해당 분류의 출고 상위 10개 품목이 표시됩니다.
+            </p>
+          ) : (
+            (() => {
+              const pieData = getCategoryOutPieChart(selectedCategoryForOut)
+              return pieData.length === 0 ? (
+                <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">
+                  해당 분류의 {selectedYear}년 출고 데이터가 없습니다.
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height={380}>
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={140}
+                      label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                    >
+                      {pieData.map((_, index) => (
+                        <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value) => [value, '출고수량']} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              )
+            })()
+          )}
 
-          {/* 품목별 회전율 */}
-          <h2 className="text-lg font-semibold mt-12 mb-2">품목별 재고 회전율 Top 15</h2>
-          <p className="text-xs text-gray-400 mb-4">※ 회전율 = 출고합계 ÷ 입고합계</p>
-          <ResponsiveContainer width="100%" height={400}>
-            <BarChart data={getTurnoverChart()} layout="vertical" margin={{ top: 10, right: 60, left: 150, bottom: 0 }}>
+          {/* 품목별 재고 회전율 Top 15 (상품명 기준) */}
+          <h2 className="text-lg font-semibold mt-12 mb-4">품목별 재고 회전율 Top 15</h2>
+          <p className="text-xs text-gray-400 mb-3">※ 회전율 = 출고합계 ÷ 입고합계. 1에 가까울수록 입고한 만큼 출고된 것입니다.</p>
+          <ResponsiveContainer width="100%" height={450}>
+            <BarChart data={getTurnoverChart()} layout="vertical" margin={{ top: 10, right: 60, left: 160, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" />
-              <YAxis type="category" dataKey="name" width={140} />
-              <Tooltip />
+              <XAxis type="number" domain={[0, 'auto']} />
+              <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 12 }} />
+              <Tooltip formatter={(value) => [value, '회전율']} />
               <Bar dataKey="회전율" fill="#8b5cf6" label={{ position: 'right', fontSize: 12 }} />
             </BarChart>
           </ResponsiveContainer>
 
           {/* 재고 소진 예상일 */}
           <h2 className="text-lg font-semibold mt-12 mb-2">재고 소진 예상일 (최근 30일 출고 기준)</h2>
-          <p className="text-xs text-gray-400 mb-4">※ 최근 30일 평균 일출고량 기준 예측</p>
+          <p className="text-xs text-gray-400 mb-4">※ 최근 30일 평균 일출고량 기준으로 현재 재고가 며칠 뒤 소진되는지 예측합니다.</p>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse border border-gray-300 text-sm">
               <thead>
                 <tr className="bg-purple-50">
                   <th className="border border-gray-300 p-2">코드</th>
-                  <th className="border border-gray-300 p-2">판매자상품코드</th>
                   <th className="border border-gray-300 p-2">분류</th>
                   <th className="border border-gray-300 p-2">옵션</th>
                   <th className="border border-gray-300 p-2">보유재고</th>
@@ -710,7 +783,8 @@ export default function Home() {
               <tbody>
                 {stockoutData.map((item, idx) => {
                   const daysLeft = item.daysLeft
-                  const urgency = daysLeft === null ? 'text-gray-400'
+                  const urgency =
+                    daysLeft === null ? 'text-gray-400'
                     : daysLeft <= 7 ? 'text-red-600 font-bold'
                     : daysLeft <= 30 ? 'text-yellow-600 font-semibold'
                     : 'text-green-600'
@@ -721,9 +795,9 @@ export default function Home() {
                     <tr key={idx} className={
                       daysLeft !== null && daysLeft <= 7 ? 'bg-red-50'
                       : daysLeft !== null && daysLeft <= 30 ? 'bg-yellow-50'
-                      : ''}>
+                      : ''
+                    }>
                       <td className="border border-gray-300 p-2">{item.code}</td>
-                      <td className="border border-gray-300 p-2">{item.seller_code}</td>
                       <td className="border border-gray-300 p-2">{item.category}</td>
                       <td className="border border-gray-300 p-2">{item.option}</td>
                       <td className="border border-gray-300 p-2 text-center">{item.current_stock}</td>
@@ -742,6 +816,7 @@ export default function Home() {
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 inline-block"></span> 7일 이내 소진</span>
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-yellow-100 inline-block"></span> 30일 이내 소진</span>
           </div>
+
         </section>
       )}
     </main>
