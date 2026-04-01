@@ -48,30 +48,27 @@ export default function Home() {
     setLoading(false)
   }
 
-  // 분류 목록
   const categoryList = Array.from(new Set(outData.map((item) => item.category).filter(Boolean))).sort()
 
-  // 월별 차트
   function getMonthlyChart() {
     const months = Array.from({ length: 12 }, (_, i) => ({
       month: `${i + 1}월`, 입고: 0, 출고: 0, 반품: 0,
     }))
     inData.forEach((item) => {
-      const date = new Date(item.order_date)
-      if (date.getFullYear() === selectedYear) months[date.getMonth()].입고 += item.order_qty || 0
+      const d = new Date(item.order_date)
+      if (d.getFullYear() === selectedYear) months[d.getMonth()].입고 += item.order_qty || 0
     })
     outData.forEach((item) => {
-      const date = new Date(item.out_date)
-      if (date.getFullYear() === selectedYear) months[date.getMonth()].출고 += item.out_qty || 0
+      const d = new Date(item.out_date)
+      if (d.getFullYear() === selectedYear) months[d.getMonth()].출고 += item.out_qty || 0
     })
     returnData.forEach((item) => {
-      const date = new Date(item.return_date)
-      if (date.getFullYear() === selectedYear) months[date.getMonth()].반품 += item.return_qty || 0
+      const d = new Date(item.return_date)
+      if (d.getFullYear() === selectedYear) months[d.getMonth()].반품 += item.return_qty || 0
     })
     return months
   }
 
-  // 분류별 출고 상위 10 원형 (선택한 분류 내 상품명 기준)
   function getCategoryPieChart() {
     const map: Record<string, number> = {}
     outData.forEach((item) => {
@@ -86,11 +83,11 @@ export default function Home() {
       .slice(0, 10)
   }
 
-  // 분류별 출고 막대 (선택한 분류 내 상품명 기준)
   function getCategoryBarChart() {
     const map: Record<string, number> = {}
     outData.forEach((item) => {
-      if (date.getFullYear() === selectedYear) {
+      const d = new Date(item.out_date)
+      if (d.getFullYear() === selectedYear) {
         if (selectedCategoryBar === '' || item.category === selectedCategoryBar) {
           const name = item.seller_code || item.code || '기타'
           map[name] = (map[name] || 0) + (item.out_qty || 0)
@@ -103,7 +100,6 @@ export default function Home() {
       .slice(0, 10)
   }
 
-  // 품목별 회전율 (상품명 기준)
   function getTurnoverChart() {
     return stockData
       .filter((item) => (item.in_total || 0) > 0)
@@ -115,7 +111,6 @@ export default function Home() {
       .slice(0, 15)
   }
 
-  // 이번달 vs 지난달 비교
   function getMonthComparison() {
     const now = new Date()
     const thisMonth = now.getMonth()
@@ -149,7 +144,6 @@ export default function Home() {
     ]
   }
 
-  // 재고 소진 예상일
   function getDaysUntilStockout() {
     const now = new Date()
     const thirtyDaysAgo = new Date(now)
@@ -182,7 +176,6 @@ export default function Home() {
       .slice(0, 20)
   }
 
-  // 필터
   const filteredStock = stockData.filter((item) =>
     (searchCode === '' || item.code?.includes(searchCode)) &&
     (searchSellerCode === '' || item.seller_code?.includes(searchSellerCode)) &&
@@ -636,12 +629,11 @@ export default function Home() {
             </BarChart>
           </ResponsiveContainer>
 
-          {/* 분류별 출고 원형 차트 */}
+          {/* 분류별 출고 원형 */}
           <h2 className="text-lg font-semibold mt-12 mb-4">분류별 출고 상위 10 (원형)</h2>
           <div className="flex items-center gap-3 mb-4">
             <span className="text-sm">분류 선택</span>
-            <select value={selectedCategoryPie}
-              onChange={(e) => setSelectedCategoryPie(e.target.value)}
+            <select value={selectedCategoryPie} onChange={(e) => setSelectedCategoryPie(e.target.value)}
               className="border border-gray-300 rounded px-3 py-2 text-sm">
               <option value="">전체</option>
               {categoryList.map((cat) => (
@@ -663,12 +655,11 @@ export default function Home() {
             </PieChart>
           </ResponsiveContainer>
 
-          {/* 분류별 출고 막대 차트 */}
+          {/* 분류별 출고 막대 */}
           <h2 className="text-lg font-semibold mt-12 mb-4">{selectedYear}년 분류별 출고 수량 (막대)</h2>
           <div className="flex items-center gap-3 mb-4">
             <span className="text-sm">분류 선택</span>
-            <select value={selectedCategoryBar}
-              onChange={(e) => setSelectedCategoryBar(e.target.value)}
+            <select value={selectedCategoryBar} onChange={(e) => setSelectedCategoryBar(e.target.value)}
               className="border border-gray-300 rounded px-3 py-2 text-sm">
               <option value="">전체</option>
               {categoryList.map((cat) => (
