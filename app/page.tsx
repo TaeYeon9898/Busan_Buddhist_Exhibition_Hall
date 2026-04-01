@@ -26,8 +26,8 @@ export default function Home() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
 
   const [selectedCategoryForOut, setSelectedCategoryForOut] = useState('')
-  const [selectedCategoryForStock, setSelectedCategoryForStock] = useState('')
   const [selectedCategoryForTurnover, setSelectedCategoryForTurnover] = useState('')
+  const [selectedYearForOut, setSelectedYearForOut] = useState(new Date().getFullYear())
 
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 50
@@ -78,28 +78,13 @@ export default function Home() {
     return months
   }
 
-  // ─── 분류별 재고 현황: 선택 분류 내 품목별 출고 Top10 파이차트 ────────────
-  function getCategoryStockPieChart(category: string) {
-    const map: Record<string, number> = {}
-    outData.forEach((item) => {
-      if ((item.category || '') === category) {
-        const name = item.seller_code || item.code || '기타'
-        map[name] = (map[name] || 0) + (item.out_qty || 0)
-      }
-    })
-    return Object.entries(map)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10)
-  }
-
-  // ─── 분류별 출고 수량: 선택 분류 내 품목별 출고 Top10 파이차트 (연도 필터) ─
-  function getCategoryOutPieChart(category: string) {
+  // ─── 분류 + 연도 선택 → 출고 Top10 파이차트 (3번+4번 통합) ────────────────
+  function getCategoryOutPieChart(category: string, year: number) {
     const map: Record<string, number> = {}
     outData.forEach((item) => {
       if (
         (item.category || '') === category &&
-        new Date(item.out_date).getFullYear() === selectedYear
+        new Date(item.out_date).getFullYear() === year
       ) {
         const name = item.seller_code || item.code || '기타'
         map[name] = (map[name] || 0) + (item.out_qty || 0)
@@ -111,13 +96,24 @@ export default function Home() {
       .slice(0, 10)
   }
 
-  // ─── 분류별 재고 회전율 Top10 ─────────────────────────────────────────────
+  // ─── 분류별 재고 회전율 Top10 (판매자상품코드 기준 중복 합산) ─────────────
   function getTurnoverChart(category: string) {
-    return stockData
-      .filter((item) => (item.in_total || 0) > 0 && (item.category || '') === category)
+    // 판매자상품코드 기준으로 in_total, out_total 합산
+    const map: Record<string, { in_total: number; out_total: number; name: string }> = {}
+    stockData
+      .filter((item) => (item.category || '') === category)
+      .forEach((item) => {
+        const key = item.seller_code || item.code || '미등록'
+        const name = item.seller_code || item.code || '미등록'
+        if (!map[key]) map[key] = { in_total: 0, out_total: 0, name }
+        map[key].in_total += item.in_total || 0
+        map[key].out_total += item.out_total || 0
+      })
+    return Object.values(map)
+      .filter((item) => item.in_total > 0)
       .map((item) => ({
-        name: item.product_name || item.seller_code || item.code || '미등록',
-        회전율: parseFloat(((item.out_total || 0) / (item.in_total || 1)).toFixed(2)),
+        name: item.name,
+        회전율: parseFloat((item.out_total / item.in_total).toFixed(2)),
       }))
       .sort((a, b) => b.회전율 - a.회전율)
       .slice(0, 10)
@@ -652,81 +648,43 @@ export default function Home() {
             </BarChart>
           </ResponsiveContainer>
 
-          {/* 분류별 재고 현황: 콤보박스 → 품목별 출고 Top10 파이차트 */}
-          <h2 className="text-lg font-semibold mt-12 mb-3">분류별 재고 현황</h2>
-          <div className="flex items-center gap-3 mb-4">
-            <label className="text-sm text-gray-600">분류 선택</label>
-            <select
-              value={selectedCategoryForStock}
-              onChange={(e) => setSelectedCategoryForStock(e.target.value)}
-              className="border border-gray-300 rounded px-3 py-2 text-sm"
-            >
-              <option value="">-- 분류를 선택하세요 --</option>
-              {allCategories.map((cat) => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
-          </div>
-          {selectedCategoryForStock === '' ? (
-            <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">
-              분류를 선택하면 해당 분류의 출고 상위 10개 품목이 표시됩니다.
-            </p>
-          ) : (
-            (() => {
-              const pieData = getCategoryStockPieChart(selectedCategoryForStock)
-              return pieData.length === 0 ? (
-                <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">
-                  해당 분류의 출고 데이터가 없습니다.
-                </p>
-              ) : (
-                <ResponsiveContainer width="100%" height={380}>
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      dataKey="value"
-                      nameKey="name"
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={140}
-                      label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
-                    >
-                      {pieData.map((_, index) => (
-                        <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value) => [value, '출고수량']} />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              )
-            })()
-          )}
-
-          {/* 분류별 출고 수량: 콤보박스 → 품목별 출고 Top10 파이차트 (연도 필터) */}
-          <h2 className="text-lg font-semibold mt-12 mb-3">{selectedYear}년 분류별 출고 수량</h2>
-          <div className="flex items-center gap-3 mb-4">
+          {/* 분류+연도 선택 → 출고 Top10 파이차트 (3+4 통합) */}
+          <h2 className="text-lg font-semibold mt-12 mb-3">
+            {selectedCategoryForOut && selectedYearForOut ? `${selectedYearForOut}년 ${selectedCategoryForOut} 출고 Top 10` : '연도별 분류 출고 Top 10'}
+          </h2>
+          <div className="flex items-center gap-3 mb-4 flex-wrap">
             <label className="text-sm text-gray-600">분류 선택</label>
             <select
               value={selectedCategoryForOut}
               onChange={(e) => setSelectedCategoryForOut(e.target.value)}
               className="border border-gray-300 rounded px-3 py-2 text-sm"
             >
-              <option value="">-- 분류를 선택하세요 --</option>
+              <option value="">-- 분류 --</option>
               {allCategories.map((cat) => (
                 <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+            <label className="text-sm text-gray-600">연도 선택</label>
+            <select
+              value={selectedYearForOut}
+              onChange={(e) => setSelectedYearForOut(Number(e.target.value))}
+              className="border border-gray-300 rounded px-3 py-2 text-sm"
+            >
+              {[2023, 2024, 2025, 2026].map((year) => (
+                <option key={year} value={year}>{year}년</option>
               ))}
             </select>
           </div>
           {selectedCategoryForOut === '' ? (
             <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">
-              분류를 선택하면 {selectedYear}년 해당 분류의 출고 상위 10개 품목이 표시됩니다.
+              분류를 선택하면 해당 연도·분류의 출고 상위 10개 품목이 표시됩니다.
             </p>
           ) : (
             (() => {
-              const pieData = getCategoryOutPieChart(selectedCategoryForOut)
+              const pieData = getCategoryOutPieChart(selectedCategoryForOut, selectedYearForOut)
               return pieData.length === 0 ? (
                 <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">
-                  해당 분류의 {selectedYear}년 출고 데이터가 없습니다.
+                  해당 분류의 {selectedYearForOut}년 출고 데이터가 없습니다.
                 </p>
               ) : (
                 <ResponsiveContainer width="100%" height={380}>
