@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  PieChart, Pie, Cell, LineChart, Line
+  PieChart, Pie, Cell
 } from 'recharts'
 
 const PIE_COLORS = ['#3b82f6', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16']
@@ -18,11 +18,15 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('stock')
 
   const [searchCode, setSearchCode] = useState('')
+  const [searchSellerCode, setSearchSellerCode] = useState('')
   const [searchSupplier, setSearchSupplier] = useState('')
   const [searchCategory, setSearchCategory] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
+
+  const [selectedCategoryPie, setSelectedCategoryPie] = useState('')
+  const [selectedCategoryBar, setSelectedCategoryBar] = useState('')
 
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 50
@@ -44,8 +48,10 @@ export default function Home() {
     setLoading(false)
   }
 
-  // ─── 기존 차트 함수 ───────────────────────────────────────────────────────
+  // 분류 목록
+  const categoryList = Array.from(new Set(outData.map((item) => item.category).filter(Boolean))).sort()
 
+  // 월별 차트
   function getMonthlyChart() {
     const months = Array.from({ length: 12 }, (_, i) => ({
       month: `${i + 1}월`, 입고: 0, 출고: 0, 반품: 0,
@@ -65,21 +71,13 @@ export default function Home() {
     return months
   }
 
-  function getCategoryStockChart() {
+  // 분류별 출고 상위 10 원형 (선택한 분류 내 상품명 기준)
+  function getCategoryPieChart() {
     const map: Record<string, number> = {}
-    stockData.forEach((item) => {
-      const cat = item.category || '기타'
-      map[cat] = (map[cat] || 0) + (item.current_stock || 0)
-    })
-    return Object.entries(map).map(([name, value]) => ({ name, value }))
-  }
-
-  function getSupplierInChart() {
-    const map: Record<string, number> = {}
-    inData.forEach((item) => {
-      if (new Date(item.order_date).getFullYear() === selectedYear) {
-        const sup = item.supplier || '기타'
-        map[sup] = (map[sup] || 0) + (item.order_qty || 0)
+    outData.forEach((item) => {
+      if (selectedCategoryPie === '' || item.category === selectedCategoryPie) {
+        const name = item.seller_code || item.code || '기타'
+        map[name] = (map[name] || 0) + (item.out_qty || 0)
       }
     })
     return Object.entries(map)
@@ -88,96 +86,36 @@ export default function Home() {
       .slice(0, 10)
   }
 
-  // ─── 신규 차트 함수 1: 품목별 회전율 ──────────────────────────────────────
-  // 회전율 = 출고합계 / 입고합계 (입고가 0이면 제외)
+  // 분류별 출고 막대 (선택한 분류 내 상품명 기준)
+  function getCategoryBarChart() {
+    const map: Record<string, number> = {}
+    outData.forEach((item) => {
+      if (date.getFullYear() === selectedYear) {
+        if (selectedCategoryBar === '' || item.category === selectedCategoryBar) {
+          const name = item.seller_code || item.code || '기타'
+          map[name] = (map[name] || 0) + (item.out_qty || 0)
+        }
+      }
+    })
+    return Object.entries(map)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10)
+  }
+
+  // 품목별 회전율 (상품명 기준)
   function getTurnoverChart() {
     return stockData
       .filter((item) => (item.in_total || 0) > 0)
       .map((item) => ({
-        name: item.code,
+        name: item.seller_code || item.code,
         회전율: parseFloat(((item.out_total || 0) / (item.in_total || 1)).toFixed(2)),
-        option: item.option || '',
       }))
       .sort((a, b) => b.회전율 - a.회전율)
       .slice(0, 15)
   }
 
-  // ─── 신규 차트 함수 2: 월별 누적 재고 추이 ────────────────────────────────
-  function getCumulativeStockChart() {
-    const months = Array.from({ length: 12 }, (_, i) => ({
-      month: `${i + 1}월`,
-      누적재고: 0,
-      입고누계: 0,
-      출고누계: 0,
-    }))
-
-    // 해당 연도 이전까지의 초기 재고(현재 재고에서 역산)
-    // 간단하게: 현재 총 재고 기준으로 월별 입출고 변화량으로 추이 표현
-    let runningStock = stockData.reduce((sum, item) => sum + (item.current_stock || 0), 0)
-
-    // 월별 입고/출고 계산 (역순으로 누적)
-    const monthlyIn = Array(12).fill(0)
-    const monthlyOut = Array(12).fill(0)
-
-    inData.forEach((item) => {
-      const date = new Date(item.order_date)
-      if (date.getFullYear() === selectedYear) monthlyIn[date.getMonth()] += item.order_qty || 0
-    })
-    outData.forEach((item) => {
-      const date = new Date(item.out_date)
-      if (date.getFullYear() === selectedYear) monthlyOut[date.getMonth()] += item.out_qty || 0
-    })
-
-    // 12월부터 역산하여 월별 재고 추이 생성
-    let stock = runningStock
-    const result = []
-    for (let i = 11; i >= 0; i--) {
-      result.unshift({
-        month: `${i + 1}월`,
-        누적재고: stock,
-        입고: monthlyIn[i],
-        출고: monthlyOut[i],
-      })
-      stock = stock - monthlyIn[i] + monthlyOut[i]
-    }
-    return result
-  }
-
-  // ─── 신규 차트 함수 3: 거래처별 미입고율 ──────────────────────────────────
-  function getSupplierPendingChart() {
-    const map: Record<string, { ordered: number; pending: number }> = {}
-    inData.forEach((item) => {
-      const sup = item.supplier || '기타'
-      if (!map[sup]) map[sup] = { ordered: 0, pending: 0 }
-      map[sup].ordered += item.order_qty || 0
-      map[sup].pending += item.pending_qty || 0
-    })
-    return Object.entries(map)
-      .map(([name, { ordered, pending }]) => ({
-        name,
-        미입고율: ordered > 0 ? parseFloat(((pending / ordered) * 100).toFixed(1)) : 0,
-        미입고수량: pending,
-      }))
-      .filter((item) => item.미입고수량 > 0)
-      .sort((a, b) => b.미입고율 - a.미입고율)
-      .slice(0, 10)
-  }
-
-  // ─── 신규 차트 함수 4: 분류별 출고 Top ────────────────────────────────────
-  function getCategoryOutChart() {
-    const map: Record<string, number> = {}
-    outData.forEach((item) => {
-      if (new Date(item.out_date).getFullYear() === selectedYear) {
-        const cat = item.category || '기타'
-        map[cat] = (map[cat] || 0) + (item.out_qty || 0)
-      }
-    })
-    return Object.entries(map)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-  }
-
-  // ─── 신규 기능 5: 기간 비교 카드 (이번 달 vs 지난달) ──────────────────────
+  // 이번달 vs 지난달 비교
   function getMonthComparison() {
     const now = new Date()
     const thisMonth = now.getMonth()
@@ -186,12 +124,10 @@ export default function Home() {
     const lastMonthYear = thisMonth === 0 ? thisYear - 1 : thisYear
 
     const calc = (data: any[], dateKey: string, qtyKey: string, m: number, y: number) =>
-      data
-        .filter((item) => {
-          const d = new Date(item[dateKey])
-          return d.getMonth() === m && d.getFullYear() === y
-        })
-        .reduce((sum, item) => sum + (item[qtyKey] || 0), 0)
+      data.filter((item) => {
+        const d = new Date(item[dateKey])
+        return d.getMonth() === m && d.getFullYear() === y
+      }).reduce((sum, item) => sum + (item[qtyKey] || 0), 0)
 
     const thisIn = calc(inData, 'order_date', 'order_qty', thisMonth, thisYear)
     const lastIn = calc(inData, 'order_date', 'order_qty', lastMonth, lastMonthYear)
@@ -205,18 +141,16 @@ export default function Home() {
       const p = (((cur - prev) / prev) * 100).toFixed(1)
       return cur >= prev ? `+${p}%` : `${p}%`
     }
-    const isUp = (cur: number, prev: number) => cur >= prev
 
     return [
-      { label: '입고', this: thisIn, last: lastIn, diff: diff(thisIn, lastIn), up: isUp(thisIn, lastIn) },
-      { label: '출고', this: thisOut, last: lastOut, diff: diff(thisOut, lastOut), up: isUp(thisOut, lastOut) },
-      { label: '반품', this: thisReturn, last: lastReturn, diff: diff(thisReturn, lastReturn), up: !isUp(thisReturn, lastReturn) },
+      { label: '입고', this: thisIn, last: lastIn, diff: diff(thisIn, lastIn), up: thisIn >= lastIn },
+      { label: '출고', this: thisOut, last: lastOut, diff: diff(thisOut, lastOut), up: thisOut >= lastOut },
+      { label: '반품', this: thisReturn, last: lastReturn, diff: diff(thisReturn, lastReturn), up: thisReturn <= lastReturn },
     ]
   }
 
-  // ─── 신규 기능 6: 재고 소진 예상일 ────────────────────────────────────────
+  // 재고 소진 예상일
   function getDaysUntilStockout() {
-    // 최근 30일 출고 기준 일평균 출고량 계산
     const now = new Date()
     const thirtyDaysAgo = new Date(now)
     thirtyDaysAgo.setDate(now.getDate() - 30)
@@ -225,8 +159,7 @@ export default function Home() {
     outData.forEach((item) => {
       const d = new Date(item.out_date)
       if (d >= thirtyDaysAgo) {
-        const code = item.code
-        recentOutMap[code] = (recentOutMap[code] || 0) + (item.out_qty || 0)
+        recentOutMap[item.code] = (recentOutMap[item.code] || 0) + (item.out_qty || 0)
       }
     })
 
@@ -236,6 +169,7 @@ export default function Home() {
         const daysLeft = dailyOut > 0 ? Math.floor((item.current_stock || 0) / dailyOut) : null
         return {
           code: item.code,
+          seller_code: item.seller_code || '',
           option: item.option || '',
           category: item.category || '',
           current_stock: item.current_stock || 0,
@@ -248,10 +182,10 @@ export default function Home() {
       .slice(0, 20)
   }
 
-  // ─── 필터 ─────────────────────────────────────────────────────────────────
-
+  // 필터
   const filteredStock = stockData.filter((item) =>
     (searchCode === '' || item.code?.includes(searchCode)) &&
+    (searchSellerCode === '' || item.seller_code?.includes(searchSellerCode)) &&
     (searchSupplier === '' || item.supplier?.includes(searchSupplier)) &&
     (searchCategory === '' || item.category?.includes(searchCategory))
   )
@@ -259,12 +193,14 @@ export default function Home() {
   const lowStockData = stockData.filter((item) =>
     item.current_stock <= item.alarm_qty &&
     (searchCode === '' || item.code?.includes(searchCode)) &&
+    (searchSellerCode === '' || item.seller_code?.includes(searchSellerCode)) &&
     (searchSupplier === '' || item.supplier?.includes(searchSupplier)) &&
     (searchCategory === '' || item.category?.includes(searchCategory))
   )
 
   const filteredIn = inData.filter((item) =>
     (searchCode === '' || item.code?.includes(searchCode)) &&
+    (searchSellerCode === '' || item.seller_code?.includes(searchSellerCode)) &&
     (searchSupplier === '' || item.supplier?.includes(searchSupplier)) &&
     (searchCategory === '' || item.category?.includes(searchCategory)) &&
     (startDate === '' || item.order_date >= startDate) &&
@@ -273,6 +209,7 @@ export default function Home() {
 
   const filteredOut = outData.filter((item) =>
     (searchCode === '' || item.code?.includes(searchCode)) &&
+    (searchSellerCode === '' || item.seller_code?.includes(searchSellerCode)) &&
     (searchCategory === '' || item.category?.includes(searchCategory)) &&
     (startDate === '' || item.out_date >= startDate) &&
     (endDate === '' || item.out_date <= endDate)
@@ -280,6 +217,7 @@ export default function Home() {
 
   const filteredReturn = returnData.filter((item) =>
     (searchCode === '' || item.code?.includes(searchCode)) &&
+    (searchSellerCode === '' || item.seller_code?.includes(searchSellerCode)) &&
     (searchCategory === '' || item.category?.includes(searchCategory)) &&
     (startDate === '' || item.return_date >= startDate) &&
     (endDate === '' || item.return_date <= endDate)
@@ -288,6 +226,7 @@ export default function Home() {
   const pendingData = inData.filter((item) =>
     (item.pending_qty || 0) > 0 &&
     (searchCode === '' || item.code?.includes(searchCode)) &&
+    (searchSellerCode === '' || item.seller_code?.includes(searchSellerCode)) &&
     (searchSupplier === '' || item.supplier?.includes(searchSupplier)) &&
     (searchCategory === '' || item.category?.includes(searchCategory)) &&
     (startDate === '' || item.order_date >= startDate) &&
@@ -308,11 +247,8 @@ export default function Home() {
     return (
       <div className="flex justify-center gap-2 mt-4">
         {Array.from({ length: pages }, (_, i) => i + 1).map((page) => (
-          <button
-            key={page}
-            onClick={() => setCurrentPage(page)}
-            className={`px-3 py-1 text-sm rounded ${currentPage === page ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'}`}
-          >
+          <button key={page} onClick={() => setCurrentPage(page)}
+            className={`px-3 py-1 text-sm rounded ${currentPage === page ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'}`}>
             {page}
           </button>
         ))}
@@ -324,6 +260,7 @@ export default function Home() {
     setActiveTab(tab)
     setCurrentPage(1)
     setSearchCode('')
+    setSearchSellerCode('')
     setSearchSupplier('')
     setSearchCategory('')
     setStartDate('')
@@ -338,6 +275,8 @@ export default function Home() {
 
   const tabs = [
     { id: 'stock', label: '재고 현황' },
+    { id: 'lowstock', label: `재고 부족 ${lowStockItems}건` },
+    { id: 'pending', label: `미입고 ${totalPending}건` },
     { id: 'in', label: '입고 내역' },
     { id: 'out', label: '출고 내역' },
     { id: 'return', label: '반품 내역' },
@@ -348,6 +287,9 @@ export default function Home() {
     <div className="flex flex-wrap gap-3 mb-6">
       <input type="text" placeholder="코드 검색" value={searchCode}
         onChange={(e) => { setSearchCode(e.target.value); setCurrentPage(1) }}
+        className="border border-gray-300 rounded px-3 py-2 text-sm" />
+      <input type="text" placeholder="판매자상품코드 검색" value={searchSellerCode}
+        onChange={(e) => { setSearchSellerCode(e.target.value); setCurrentPage(1) }}
         className="border border-gray-300 rounded px-3 py-2 text-sm" />
       {showSupplier && (
         <input type="text" placeholder="거래처 검색" value={searchSupplier}
@@ -650,7 +592,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* ── 통계 탭 ──────────────────────────────────────────────────────────── */}
+      {/* 통계 */}
       {activeTab === 'chart' && (
         <section>
           <div className="flex items-center gap-4 mb-8">
@@ -664,26 +606,22 @@ export default function Home() {
             </select>
           </div>
 
-          {/* ── 5. 기간 비교 카드 (이번 달 vs 지난달) ──────────────────────── */}
-          <h2 className="text-lg font-semibold mb-4">
-            이번 달 ({thisMonthLabel}) vs 지난달 ({lastMonthLabel}) 비교
-          </h2>
+          {/* 이번달 vs 지난달 */}
+          <h2 className="text-lg font-semibold mb-4">이번 달 ({thisMonthLabel}) vs 지난달 ({lastMonthLabel}) 비교</h2>
           <div className="grid grid-cols-3 gap-4 mb-10">
             {monthComparison.map((item) => (
               <div key={item.label} className="border rounded-lg p-4 bg-white shadow-sm">
                 <p className="text-sm text-gray-500 mb-1">{item.label}</p>
                 <div className="flex items-end gap-3">
                   <p className="text-2xl font-bold">{item.this.toLocaleString()}</p>
-                  <p className={`text-sm font-medium pb-0.5 ${item.up ? 'text-blue-500' : 'text-red-500'}`}>
-                    {item.diff}
-                  </p>
+                  <p className={`text-sm font-medium pb-0.5 ${item.up ? 'text-blue-500' : 'text-red-500'}`}>{item.diff}</p>
                 </div>
                 <p className="text-xs text-gray-400 mt-1">지난달: {item.last.toLocaleString()}</p>
               </div>
             ))}
           </div>
 
-          {/* ── 1. 월별 막대 차트 ─────────────────────────────────────────── */}
+          {/* 월별 막대 차트 */}
           <h2 className="text-lg font-semibold mb-4">{selectedYear}년 월별 입고/출고/반품</h2>
           <ResponsiveContainer width="100%" height={350}>
             <BarChart data={getMonthlyChart()} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
@@ -698,36 +636,25 @@ export default function Home() {
             </BarChart>
           </ResponsiveContainer>
 
-          {/* ── 2. 월별 누적 재고 추이 (라인차트) ───────────────────────────── */}
-          <h2 className="text-lg font-semibold mt-12 mb-4">{selectedYear}년 월별 누적 재고 추이</h2>
-          <p className="text-xs text-gray-400 mb-3">※ 현재 재고 기준 역산한 추이입니다.</p>
-          <ResponsiveContainer width="100%" height={350}>
-            <LineChart data={getCumulativeStockChart()} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="누적재고" stroke="#6366f1" strokeWidth={2} dot={{ r: 4 }} />
-              <Line type="monotone" dataKey="입고" stroke="#3b82f6" strokeWidth={1} strokeDasharray="4 4" />
-              <Line type="monotone" dataKey="출고" stroke="#ef4444" strokeWidth={1} strokeDasharray="4 4" />
-            </LineChart>
-          </ResponsiveContainer>
-
-          {/* ── 분류별 재고 파이 차트 ──────────────────────────────────────── */}
-          <h2 className="text-lg font-semibold mt-12 mb-4">분류별 재고 현황</h2>
+          {/* 분류별 출고 원형 차트 */}
+          <h2 className="text-lg font-semibold mt-12 mb-4">분류별 출고 상위 10 (원형)</h2>
+          <div className="flex items-center gap-3 mb-4">
+            <span className="text-sm">분류 선택</span>
+            <select value={selectedCategoryPie}
+              onChange={(e) => setSelectedCategoryPie(e.target.value)}
+              className="border border-gray-300 rounded px-3 py-2 text-sm">
+              <option value="">전체</option>
+              {categoryList.map((cat) => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+          </div>
           <ResponsiveContainer width="100%" height={350}>
             <PieChart>
-              <Pie
-                data={getCategoryStockChart()}
-                dataKey="value"
-                nameKey="name"
-                cx="50%"
-                cy="50%"
-                outerRadius={130}
-                label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
-              >
-                {getCategoryStockChart().map((_, index) => (
+              <Pie data={getCategoryPieChart()} dataKey="value" nameKey="name"
+                cx="50%" cy="50%" outerRadius={130}
+                label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}>
+                {getCategoryPieChart().map((_, index) => (
                   <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                 ))}
               </Pie>
@@ -736,63 +663,51 @@ export default function Home() {
             </PieChart>
           </ResponsiveContainer>
 
-          {/* ── 4. 분류별 출고 Top ──────────────────────────────────────────── */}
-          <h2 className="text-lg font-semibold mt-12 mb-4">{selectedYear}년 분류별 출고 수량</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={getCategoryOutChart()} layout="vertical" margin={{ top: 10, right: 30, left: 80, bottom: 0 }}>
+          {/* 분류별 출고 막대 차트 */}
+          <h2 className="text-lg font-semibold mt-12 mb-4">{selectedYear}년 분류별 출고 수량 (막대)</h2>
+          <div className="flex items-center gap-3 mb-4">
+            <span className="text-sm">분류 선택</span>
+            <select value={selectedCategoryBar}
+              onChange={(e) => setSelectedCategoryBar(e.target.value)}
+              className="border border-gray-300 rounded px-3 py-2 text-sm">
+              <option value="">전체</option>
+              {categoryList.map((cat) => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+          </div>
+          <ResponsiveContainer width="100%" height={350}>
+            <BarChart data={getCategoryBarChart()} layout="vertical" margin={{ top: 10, right: 60, left: 150, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis type="number" />
-              <YAxis type="category" dataKey="name" />
+              <YAxis type="category" dataKey="name" width={140} />
               <Tooltip />
               <Bar dataKey="value" name="출고수량" fill="#ef4444" />
             </BarChart>
           </ResponsiveContainer>
 
-          {/* ── 거래처별 입고 통계 ─────────────────────────────────────────── */}
-          <h2 className="text-lg font-semibold mt-12 mb-4">{selectedYear}년 거래처별 입고 수량 (상위 10)</h2>
-          <ResponsiveContainer width="100%" height={350}>
-            <BarChart data={getSupplierInChart()} layout="vertical" margin={{ top: 10, right: 30, left: 80, bottom: 0 }}>
+          {/* 품목별 회전율 */}
+          <h2 className="text-lg font-semibold mt-12 mb-2">품목별 재고 회전율 Top 15</h2>
+          <p className="text-xs text-gray-400 mb-4">※ 회전율 = 출고합계 ÷ 입고합계</p>
+          <ResponsiveContainer width="100%" height={400}>
+            <BarChart data={getTurnoverChart()} layout="vertical" margin={{ top: 10, right: 60, left: 150, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis type="number" />
-              <YAxis type="category" dataKey="name" />
+              <YAxis type="category" dataKey="name" width={140} />
               <Tooltip />
-              <Bar dataKey="value" name="입고수량" fill="#10b981" />
-            </BarChart>
-          </ResponsiveContainer>
-
-          {/* ── 3. 거래처별 미입고율 ────────────────────────────────────────── */}
-          <h2 className="text-lg font-semibold mt-12 mb-4">거래처별 미입고율 (전체 기간)</h2>
-          <ResponsiveContainer width="100%" height={Math.max(300, getSupplierPendingChart().length * 40)}>
-            <BarChart data={getSupplierPendingChart()} layout="vertical" margin={{ top: 10, right: 60, left: 80, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" unit="%" domain={[0, 100]} />
-              <YAxis type="category" dataKey="name" />
-              <Tooltip formatter={(value) => [`${value}%`, '미입고율']} />
-              <Bar dataKey="미입고율" fill="#f97316" label={{ position: 'right', formatter: (v: unknown) => `${v}%`, fontSize: 12 }} />
-            </BarChart>
-          </ResponsiveContainer>
-
-          {/* ── 1. 품목별 회전율 ────────────────────────────────────────────── */}
-          <h2 className="text-lg font-semibold mt-12 mb-4">품목별 재고 회전율 Top 15</h2>
-          <p className="text-xs text-gray-400 mb-3">※ 회전율 = 출고합계 ÷ 입고합계. 1에 가까울수록 입고한 만큼 출고된 것입니다.</p>
-          <ResponsiveContainer width="100%" height={400}>
-            <BarChart data={getTurnoverChart()} layout="vertical" margin={{ top: 10, right: 60, left: 100, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" domain={[0, 'auto']} />
-              <YAxis type="category" dataKey="name" />
-              <Tooltip formatter={(value) => [value, '회전율']} />
               <Bar dataKey="회전율" fill="#8b5cf6" label={{ position: 'right', fontSize: 12 }} />
             </BarChart>
           </ResponsiveContainer>
 
-          {/* ── 6. 재고 소진 예상일 ─────────────────────────────────────────── */}
+          {/* 재고 소진 예상일 */}
           <h2 className="text-lg font-semibold mt-12 mb-2">재고 소진 예상일 (최근 30일 출고 기준)</h2>
-          <p className="text-xs text-gray-400 mb-4">※ 최근 30일 평균 일출고량 기준으로 현재 재고가 며칠 뒤 소진되는지 예측합니다.</p>
+          <p className="text-xs text-gray-400 mb-4">※ 최근 30일 평균 일출고량 기준 예측</p>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse border border-gray-300 text-sm">
               <thead>
                 <tr className="bg-purple-50">
                   <th className="border border-gray-300 p-2">코드</th>
+                  <th className="border border-gray-300 p-2">판매자상품코드</th>
                   <th className="border border-gray-300 p-2">분류</th>
                   <th className="border border-gray-300 p-2">옵션</th>
                   <th className="border border-gray-300 p-2">보유재고</th>
@@ -804,8 +719,7 @@ export default function Home() {
               <tbody>
                 {stockoutData.map((item, idx) => {
                   const daysLeft = item.daysLeft
-                  const urgency =
-                    daysLeft === null ? 'text-gray-400'
+                  const urgency = daysLeft === null ? 'text-gray-400'
                     : daysLeft <= 7 ? 'text-red-600 font-bold'
                     : daysLeft <= 30 ? 'text-yellow-600 font-semibold'
                     : 'text-green-600'
@@ -813,8 +727,12 @@ export default function Home() {
                     ? new Date(Date.now() + daysLeft * 86400000).toLocaleDateString('ko-KR')
                     : '-'
                   return (
-                    <tr key={idx} className={daysLeft !== null && daysLeft <= 7 ? 'bg-red-50' : daysLeft !== null && daysLeft <= 30 ? 'bg-yellow-50' : ''}>
+                    <tr key={idx} className={
+                      daysLeft !== null && daysLeft <= 7 ? 'bg-red-50'
+                      : daysLeft !== null && daysLeft <= 30 ? 'bg-yellow-50'
+                      : ''}>
                       <td className="border border-gray-300 p-2">{item.code}</td>
+                      <td className="border border-gray-300 p-2">{item.seller_code}</td>
                       <td className="border border-gray-300 p-2">{item.category}</td>
                       <td className="border border-gray-300 p-2">{item.option}</td>
                       <td className="border border-gray-300 p-2 text-center">{item.current_stock}</td>
@@ -833,7 +751,6 @@ export default function Home() {
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 inline-block"></span> 7일 이내 소진</span>
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-yellow-100 inline-block"></span> 30일 이내 소진</span>
           </div>
-
         </section>
       )}
     </main>
