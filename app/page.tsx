@@ -24,15 +24,12 @@ export default function Home() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
 
-  // 통계 탭 공통 연도/월 필터 (이번달 비교, 소진예상일 제외)
+  // 통계 탭 공통 연도/월 필터
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
   const [selectedMonth, setSelectedMonth] = useState<number>(0) // 0 = 전체
 
-  // 분류별 출고 Top10 차트 전용
+  // 분류별 출고 Top10 / 회전율 차트 전용 분류 선택
   const [selectedCategoryForOut, setSelectedCategoryForOut] = useState('')
-  const [selectedYearForOut, setSelectedYearForOut] = useState(new Date().getFullYear())
-
-  // 회전율 차트 전용
   const [selectedCategoryForTurnover, setSelectedCategoryForTurnover] = useState('')
 
   const [currentPage, setCurrentPage] = useState(1)
@@ -71,35 +68,40 @@ export default function Home() {
     return Array.from(set).sort()
   }
 
-  // ─── 월별/연도별 차트 ─────────────────────────────────────────────────────
-  // selectedMonth === 0 → 전체(연도별), 1~12 → 해당 월별
+  // ─── 입고/출고/반품 차트 (연도+월 필터) ──────────────────────────────────
+  // selectedMonth === 0 → 해당 연도 전체 (월별 X축)
+  // selectedMonth 1~12 → 해당 연도+월 (일별은 복잡하니 해당 월 단일 막대)
   function getMainChart() {
     if (selectedMonth === 0) {
-      // 전체: X축 = 연도
-      const years = getAvailableYears()
-      return years.map((year) => {
-        const 입고 = inData.filter((i) => new Date(i.order_date).getFullYear() === year).reduce((s, i) => s + (i.order_qty || 0), 0)
-        const 출고 = outData.filter((i) => new Date(i.out_date).getFullYear() === year).reduce((s, i) => s + (i.out_qty || 0), 0)
-        const 반품 = returnData.filter((i) => new Date(i.return_date).getFullYear() === year).reduce((s, i) => s + (i.return_qty || 0), 0)
-        return { label: `${year}년`, 입고, 출고, 반품 }
-      })
-    } else {
-      // 월 선택: X축 = 1~12월 (선택연도 기준)
+      // 전체: 선택 연도의 월별 데이터
       return Array.from({ length: 12 }, (_, i) => {
         const m = i
-        const 입고 = inData.filter((item) => { const d = new Date(item.order_date); return d.getFullYear() === selectedYear && d.getMonth() === m }).reduce((s, i) => s + (i.order_qty || 0), 0)
-        const 출고 = outData.filter((item) => { const d = new Date(item.out_date); return d.getFullYear() === selectedYear && d.getMonth() === m }).reduce((s, i) => s + (i.out_qty || 0), 0)
-        const 반품 = returnData.filter((item) => { const d = new Date(item.return_date); return d.getFullYear() === selectedYear && d.getMonth() === m }).reduce((s, i) => s + (i.return_qty || 0), 0)
+        const 입고 = inData.filter((item) => { const d = new Date(item.order_date); return d.getFullYear() === selectedYear && d.getMonth() === m }).reduce((s, item) => s + (item.order_qty || 0), 0)
+        const 출고 = outData.filter((item) => { const d = new Date(item.out_date); return d.getFullYear() === selectedYear && d.getMonth() === m }).reduce((s, item) => s + (item.out_qty || 0), 0)
+        const 반품 = returnData.filter((item) => { const d = new Date(item.return_date); return d.getFullYear() === selectedYear && d.getMonth() === m }).reduce((s, item) => s + (item.return_qty || 0), 0)
         return { label: `${i + 1}월`, 입고, 출고, 반품 }
+      })
+    } else {
+      // 월 선택: 해당 연도+월의 일별 데이터
+      const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate()
+      return Array.from({ length: daysInMonth }, (_, i) => {
+        const day = i + 1
+        const 입고 = inData.filter((item) => { const d = new Date(item.order_date); return d.getFullYear() === selectedYear && d.getMonth() + 1 === selectedMonth && d.getDate() === day }).reduce((s, item) => s + (item.order_qty || 0), 0)
+        const 출고 = outData.filter((item) => { const d = new Date(item.out_date); return d.getFullYear() === selectedYear && d.getMonth() + 1 === selectedMonth && d.getDate() === day }).reduce((s, item) => s + (item.out_qty || 0), 0)
+        const 반품 = returnData.filter((item) => { const d = new Date(item.return_date); return d.getFullYear() === selectedYear && d.getMonth() + 1 === selectedMonth && d.getDate() === day }).reduce((s, item) => s + (item.return_qty || 0), 0)
+        return { label: `${day}일`, 입고, 출고, 반품 }
       })
     }
   }
 
-  // ─── 분류 + 연도 선택 → 출고 Top10 파이차트 ─────────────────────────────
-  function getCategoryOutPieChart(category: string, year: number) {
+  // ─── 분류 + 공통 연도/월 → 출고 Top10 파이차트 ───────────────────────────
+  function getCategoryOutPieChart(category: string) {
     const map: Record<string, number> = {}
     outData.forEach((item) => {
-      if ((item.category || '') === category && new Date(item.out_date).getFullYear() === year) {
+      const d = new Date(item.out_date)
+      const yearMatch = d.getFullYear() === selectedYear
+      const monthMatch = selectedMonth === 0 || d.getMonth() + 1 === selectedMonth
+      if ((item.category || '') === category && yearMatch && monthMatch) {
         const name = item.seller_code || item.code || '기타'
         map[name] = (map[name] || 0) + (item.out_qty || 0)
       }
@@ -108,42 +110,53 @@ export default function Home() {
   }
 
   // ─── 분류별 재고 회전율 Top10 (판매자상품코드 기준 중복 합산) ─────────────
+  // 회전율은 출고합계/입고합계 기반이므로 기간 필터 적용 시 출고 기준으로 재계산
   function getTurnoverChart(category: string) {
-    const map: Record<string, { in_total: number; out_total: number; name: string }> = {}
-    stockData.filter((item) => (item.category || '') === category).forEach((item) => {
-      const key = item.seller_code || item.code || '미등록'
-      if (!map[key]) map[key] = { in_total: 0, out_total: 0, name: key }
-      map[key].in_total += item.in_total || 0
-      map[key].out_total += item.out_total || 0
+    const outMap: Record<string, number> = {}
+    outData.forEach((item) => {
+      const d = new Date(item.out_date)
+      const yearMatch = d.getFullYear() === selectedYear
+      const monthMatch = selectedMonth === 0 || d.getMonth() + 1 === selectedMonth
+      if ((item.category || '') === category && yearMatch && monthMatch) {
+        const key = item.seller_code || item.code || '미등록'
+        outMap[key] = (outMap[key] || 0) + (item.out_qty || 0)
+      }
     })
-    return Object.values(map)
-      .filter((item) => item.in_total > 0)
-      .map((item) => ({ name: item.name, 회전율: parseFloat((item.out_total / item.in_total).toFixed(2)) }))
+    const inMap: Record<string, number> = {}
+    inData.forEach((item) => {
+      const d = new Date(item.order_date)
+      const yearMatch = d.getFullYear() === selectedYear
+      const monthMatch = selectedMonth === 0 || d.getMonth() + 1 === selectedMonth
+      if ((item.category || '') === category && yearMatch && monthMatch) {
+        const key = item.seller_code || item.code || '미등록'
+        inMap[key] = (inMap[key] || 0) + (item.order_qty || 0)
+      }
+    })
+    const keys = new Set([...Object.keys(outMap), ...Object.keys(inMap)])
+    return Array.from(keys)
+      .map((key) => ({ name: key, 회전율: inMap[key] > 0 ? parseFloat(((outMap[key] || 0) / inMap[key]).toFixed(2)) : 0 }))
+      .filter((item) => item.회전율 > 0)
       .sort((a, b) => b.회전율 - a.회전율)
       .slice(0, 10)
   }
 
-  // ─── 기간 비교 카드 (연도/월 필터 무관, 항상 현재 기준) ──────────────────
+  // ─── 기간 비교 카드 (항상 현재 기준, 필터 무관) ───────────────────────────
   function getMonthComparison() {
     const now = new Date()
     const thisMonth = now.getMonth()
     const thisYear = now.getFullYear()
     const lastMonth = thisMonth === 0 ? 11 : thisMonth - 1
     const lastMonthYear = thisMonth === 0 ? thisYear - 1 : thisYear
-
     const calc = (data: any[], dateKey: string, qtyKey: string, m: number, y: number) =>
       data.filter((item) => { const d = new Date(item[dateKey]); return d.getMonth() === m && d.getFullYear() === y }).reduce((sum, item) => sum + (item[qtyKey] || 0), 0)
-
     const thisIn = calc(inData, 'order_date', 'order_qty', thisMonth, thisYear)
     const lastIn = calc(inData, 'order_date', 'order_qty', lastMonth, lastMonthYear)
     const thisOut = calc(outData, 'out_date', 'out_qty', thisMonth, thisYear)
     const lastOut = calc(outData, 'out_date', 'out_qty', lastMonth, lastMonthYear)
     const thisReturn = calc(returnData, 'return_date', 'return_qty', thisMonth, thisYear)
     const lastReturn = calc(returnData, 'return_date', 'return_qty', lastMonth, lastMonthYear)
-
     const diff = (cur: number, prev: number) => { if (prev === 0) return cur > 0 ? '+100%' : '0%'; const p = (((cur - prev) / prev) * 100).toFixed(1); return cur >= prev ? `+${p}%` : `${p}%` }
     const isUp = (cur: number, prev: number) => cur >= prev
-
     return [
       { label: '입고', this: thisIn, last: lastIn, diff: diff(thisIn, lastIn), up: isUp(thisIn, lastIn) },
       { label: '출고', this: thisOut, last: lastOut, diff: diff(thisOut, lastOut), up: isUp(thisOut, lastOut) },
@@ -151,7 +164,7 @@ export default function Home() {
     ]
   }
 
-  // ─── 재고 소진 예상일 (연도/월 필터 무관, 항상 최근 30일 기준) ────────────
+  // ─── 재고 소진 예상일 (항상 최근 30일 기준, 필터 무관) ────────────────────
   function getDaysUntilStockout() {
     const now = new Date()
     const thirtyDaysAgo = new Date(now)
@@ -281,10 +294,8 @@ export default function Home() {
   const thisMonthLabel = `${now.getMonth() + 1}월`
   const lastMonthLabel = now.getMonth() === 0 ? '12월' : `${now.getMonth()}월`
 
-  // 차트 제목
-  const mainChartTitle = selectedMonth === 0
-    ? '연도별 입고/출고/반품'
-    : `${selectedYear}년 ${selectedMonth}월 입고/출고/반품`
+  // 차트 제목용 기간 텍스트
+  const periodLabel = selectedMonth === 0 ? `${selectedYear}년` : `${selectedYear}년 ${selectedMonth}월`
 
   return (
     <main className="p-8">
@@ -331,6 +342,7 @@ export default function Home() {
                   <th className="border border-gray-300 p-2">판매자상품코드</th>
                   <th className="border border-gray-300 p-2">옵션</th>
                   <th className="border border-gray-300 p-2">보유재고</th>
+                  <th className="border border-gray-300 p-2">이월합계</th>
                   <th className="border border-gray-300 p-2">입고합계</th>
                   <th className="border border-gray-300 p-2">출고합계</th>
                   <th className="border border-gray-300 p-2">반품합계</th>
@@ -345,6 +357,7 @@ export default function Home() {
                     <td className="border border-gray-300 p-2">{item.seller_code}</td>
                     <td className="border border-gray-300 p-2">{item.option}</td>
                     <td className="border border-gray-300 p-2 text-center font-bold">{item.current_stock}</td>
+                    <td className="border border-gray-300 p-2 text-center">{item.carry_over ?? '-'}</td>
                     <td className="border border-gray-300 p-2 text-center">{item.in_total}</td>
                     <td className="border border-gray-300 p-2 text-center">{item.out_total}</td>
                     <td className="border border-gray-300 p-2 text-center">{item.return_total}</td>
@@ -562,14 +575,13 @@ export default function Home() {
       {activeTab === 'chart' && (
         <section>
 
-          {/* ── 공통 연도/월 필터 (이번달 비교·소진예상일 제외) ─────────────── */}
+          {/* ── 공통 연도/월 필터 ────────────────────────────────────────────── */}
           <div className="flex items-center gap-3 mb-8 flex-wrap">
             <span className="text-sm font-medium text-gray-700">기간 선택</span>
             <select
               value={selectedYear}
               onChange={(e) => setSelectedYear(Number(e.target.value))}
-              disabled={selectedMonth === 0}
-              className={`border border-gray-300 rounded px-3 py-2 text-sm ${selectedMonth === 0 ? 'opacity-40 cursor-not-allowed' : ''}`}
+              className="border border-gray-300 rounded px-3 py-2 text-sm"
             >
               {availableYears.length === 0
                 ? <option>데이터 없음</option>
@@ -586,9 +598,6 @@ export default function Home() {
                 <option key={m} value={m}>{m}월</option>
               ))}
             </select>
-            {selectedMonth === 0 && (
-              <span className="text-xs text-gray-400">※ 전체 선택 시 연도 선택은 비활성화됩니다.</span>
-            )}
           </div>
 
           {/* ── 이번 달 vs 지난달 비교 (필터 무관) ──────────────────────────── */}
@@ -608,8 +617,8 @@ export default function Home() {
             ))}
           </div>
 
-          {/* ── 입고/출고/반품 차트 (연도/월 필터 적용) ─────────────────────── */}
-          <h2 className="text-lg font-semibold mb-4">{mainChartTitle}</h2>
+          {/* ── 입고/출고/반품 차트 (연도+월 필터 적용) ─────────────────────── */}
+          <h2 className="text-lg font-semibold mb-4">{periodLabel} 입고/출고/반품</h2>
           <ResponsiveContainer width="100%" height={350}>
             <BarChart data={getMainChart()} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -623,11 +632,9 @@ export default function Home() {
             </BarChart>
           </ResponsiveContainer>
 
-          {/* ── 분류+연도 선택 → 출고 Top10 파이차트 ────────────────────────── */}
+          {/* ── 분류 출고 Top10 파이차트 (공통 연도+월 필터 적용) ─────────────── */}
           <h2 className="text-lg font-semibold mt-12 mb-3">
-            {selectedCategoryForOut && selectedYearForOut
-              ? `${selectedYearForOut}년 ${selectedCategoryForOut} 출고 Top 10`
-              : '연도별 분류 출고 Top 10'}
+            {selectedCategoryForOut ? `${periodLabel} ${selectedCategoryForOut} 출고 Top 10` : `${periodLabel} 분류 출고 Top 10`}
           </h2>
           <div className="flex items-center gap-3 mb-4 flex-wrap">
             <label className="text-sm text-gray-600">분류</label>
@@ -636,22 +643,14 @@ export default function Home() {
               <option value="">-- 분류 선택 --</option>
               {allCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
             </select>
-            <label className="text-sm text-gray-600">연도</label>
-            <select value={selectedYearForOut} onChange={(e) => setSelectedYearForOut(Number(e.target.value))}
-              className="border border-gray-300 rounded px-3 py-2 text-sm">
-              {availableYears.length === 0
-                ? <option>데이터 없음</option>
-                : availableYears.map((year) => <option key={year} value={year}>{year}년</option>)
-              }
-            </select>
           </div>
           {selectedCategoryForOut === '' ? (
-            <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">분류를 선택하면 해당 연도·분류의 출고 상위 10개 품목이 표시됩니다.</p>
+            <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">분류를 선택하면 출고 상위 10개 품목이 표시됩니다.</p>
           ) : (
             (() => {
-              const pieData = getCategoryOutPieChart(selectedCategoryForOut, selectedYearForOut)
+              const pieData = getCategoryOutPieChart(selectedCategoryForOut)
               return pieData.length === 0 ? (
-                <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">해당 분류의 {selectedYearForOut}년 출고 데이터가 없습니다.</p>
+                <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">{periodLabel} 해당 분류의 출고 데이터가 없습니다.</p>
               ) : (
                 <ResponsiveContainer width="100%" height={380}>
                   <PieChart>
@@ -667,9 +666,11 @@ export default function Home() {
             })()
           )}
 
-          {/* ── 분류별 재고 회전율 Top10 ─────────────────────────────────────── */}
-          <h2 className="text-lg font-semibold mt-12 mb-3">분류별 재고 회전율 Top 10</h2>
-          <p className="text-xs text-gray-400 mb-3">※ 회전율 = 출고합계 ÷ 입고합계. 판매자상품코드 기준으로 집계됩니다.</p>
+          {/* ── 분류별 재고 회전율 Top10 (공통 연도+월 필터 적용) ────────────── */}
+          <h2 className="text-lg font-semibold mt-12 mb-3">
+            {selectedCategoryForTurnover ? `${periodLabel} ${selectedCategoryForTurnover} 재고 회전율 Top 10` : `${periodLabel} 분류별 재고 회전율 Top 10`}
+          </h2>
+          <p className="text-xs text-gray-400 mb-3">※ 회전율 = 출고수량 ÷ 입고수량. 판매자상품코드 기준으로 집계됩니다.</p>
           <div className="flex items-center gap-3 mb-4">
             <label className="text-sm text-gray-600">분류</label>
             <select value={selectedCategoryForTurnover} onChange={(e) => setSelectedCategoryForTurnover(e.target.value)}
@@ -679,12 +680,12 @@ export default function Home() {
             </select>
           </div>
           {selectedCategoryForTurnover === '' ? (
-            <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">분류를 선택하면 해당 분류의 재고 회전율 Top 10이 표시됩니다.</p>
+            <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">분류를 선택하면 재고 회전율 Top 10이 표시됩니다.</p>
           ) : (
             (() => {
               const turnoverData = getTurnoverChart(selectedCategoryForTurnover)
               return turnoverData.length === 0 ? (
-                <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">해당 분류의 회전율 데이터가 없습니다.</p>
+                <p className="text-sm text-gray-400 py-8 text-center border rounded-lg bg-gray-50">{periodLabel} 해당 분류의 회전율 데이터가 없습니다.</p>
               ) : (
                 <ResponsiveContainer width="100%" height={Math.max(300, turnoverData.length * 45)}>
                   <BarChart data={turnoverData} layout="vertical" margin={{ top: 10, right: 60, left: 160, bottom: 0 }}>
@@ -699,7 +700,7 @@ export default function Home() {
             })()
           )}
 
-          {/* ── 재고 소진 예상일 (필터 무관) ─────────────────────────────────── */}
+          {/* ── 재고 소진 예상일 (필터 무관, 항상 최근 30일 기준) ─────────────── */}
           <h2 className="text-lg font-semibold mt-12 mb-2">재고 소진 예상일 (최근 30일 출고 기준)</h2>
           <p className="text-xs text-gray-400 mb-4">※ 최근 30일 평균 일출고량 기준으로 현재 재고가 며칠 뒤 소진되는지 예측합니다.</p>
           <div className="overflow-x-auto">
