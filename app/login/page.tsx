@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
+import bcrypt from 'bcryptjs'
 
 export default function LoginPage() {
   const [username, setUsername] = useState('')
@@ -15,14 +16,23 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
 
+    // username으로만 조회 (password는 DB에서 꺼내서 bcrypt로 비교)
     const { data, error } = await supabase
       .from('users')
       .select('*')
       .eq('username', username)
-      .eq('password', password)
       .single()
 
     if (error || !data) {
+      setError('아이디 또는 비밀번호가 올바르지 않습니다.')
+      setLoading(false)
+      return
+    }
+
+    // 입력한 비밀번호와 해싱된 비밀번호 비교
+    const isMatch = await bcrypt.compare(password, data.password)
+
+    if (!isMatch) {
       setError('아이디 또는 비밀번호가 올바르지 않습니다.')
       setLoading(false)
       return
