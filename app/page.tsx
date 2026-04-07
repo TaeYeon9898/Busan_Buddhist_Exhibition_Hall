@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -10,6 +11,7 @@ import {
 const PIE_COLORS = ['#3b82f6', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16']
 
 export default function Home() {
+  const router = useRouter()
   const [stockData, setStockData] = useState<any[]>([])
   const [inData, setInData] = useState<any[]>([])
   const [outData, setOutData] = useState<any[]>([])
@@ -24,18 +26,23 @@ export default function Home() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
 
-  // 통계 탭 공통 연도/월 필터
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
-  const [selectedMonth, setSelectedMonth] = useState<number>(0) // 0 = 전체
+  const [selectedMonth, setSelectedMonth] = useState<number>(0)
 
-  // 분류별 출고 Top10 / 회전율 차트 전용 분류 선택
   const [selectedCategoryForOut, setSelectedCategoryForOut] = useState('')
   const [selectedCategoryForTurnover, setSelectedCategoryForTurnover] = useState('')
 
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 50
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => {
+    const isLoggedIn = localStorage.getItem('isLoggedIn')
+    if (!isLoggedIn) {
+      router.push('/login')
+      return
+    }
+    fetchData()
+  }, [])
 
   async function fetchData() {
     const { data: stock } = await supabase.from('product_info').select('*').order('code')
@@ -50,7 +57,6 @@ export default function Home() {
     setLoading(false)
   }
 
-  // ─── 실제 데이터에 있는 연도만 추출 ──────────────────────────────────────
   function getAvailableYears(): number[] {
     const set = new Set<number>()
     inData.forEach((item) => { if (item.order_date) set.add(new Date(item.order_date).getFullYear()) })
@@ -59,7 +65,6 @@ export default function Home() {
     return Array.from(set).sort()
   }
 
-  // ─── 분류 목록 (입고+출고+반품 통합) ──────────────────────────────────────
   function getAllCategories(): string[] {
     const set = new Set<string>()
     inData.forEach((item) => { if (item.category) set.add(item.category) })
@@ -68,12 +73,8 @@ export default function Home() {
     return Array.from(set).sort()
   }
 
-  // ─── 입고/출고/반품 차트 (연도+월 필터) ──────────────────────────────────
-  // selectedMonth === 0 → 해당 연도 전체 (월별 X축)
-  // selectedMonth 1~12 → 해당 연도+월 (일별은 복잡하니 해당 월 단일 막대)
   function getMainChart() {
     if (selectedMonth === 0) {
-      // 전체: 선택 연도의 월별 데이터
       return Array.from({ length: 12 }, (_, i) => {
         const m = i
         const 입고 = inData.filter((item) => { const d = new Date(item.order_date); return d.getFullYear() === selectedYear && d.getMonth() === m }).reduce((s, item) => s + (item.order_qty || 0), 0)
@@ -82,7 +83,6 @@ export default function Home() {
         return { label: `${i + 1}월`, 입고, 출고, 반품 }
       })
     } else {
-      // 월 선택: 해당 연도+월의 일별 데이터
       const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate()
       return Array.from({ length: daysInMonth }, (_, i) => {
         const day = i + 1
@@ -94,7 +94,6 @@ export default function Home() {
     }
   }
 
-  // ─── 분류 + 공통 연도/월 → 출고 Top10 파이차트 ───────────────────────────
   function getCategoryOutPieChart(category: string) {
     const map: Record<string, number> = {}
     outData.forEach((item) => {
@@ -109,8 +108,6 @@ export default function Home() {
     return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10)
   }
 
-  // ─── 분류별 재고 회전율 Top10 (판매자상품코드 기준 중복 합산) ─────────────
-  // 회전율은 출고합계/입고합계 기반이므로 기간 필터 적용 시 출고 기준으로 재계산
   function getTurnoverChart(category: string) {
     const outMap: Record<string, number> = {}
     outData.forEach((item) => {
@@ -140,7 +137,6 @@ export default function Home() {
       .slice(0, 10)
   }
 
-  // ─── 기간 비교 카드 (항상 현재 기준, 필터 무관) ───────────────────────────
   function getMonthComparison() {
     const now = new Date()
     const thisMonth = now.getMonth()
@@ -156,15 +152,13 @@ export default function Home() {
     const thisReturn = calc(returnData, 'return_date', 'return_qty', thisMonth, thisYear)
     const lastReturn = calc(returnData, 'return_date', 'return_qty', lastMonth, lastMonthYear)
     const diff = (cur: number, prev: number) => { if (prev === 0) return cur > 0 ? '+100%' : '0%'; const p = (((cur - prev) / prev) * 100).toFixed(1); return cur >= prev ? `+${p}%` : `${p}%` }
-    const isUp = (cur: number, prev: number) => cur >= prev
     return [
-      { label: '입고', this: thisIn, last: lastIn, diff: diff(thisIn, lastIn), up: isUp(thisIn, lastIn) },
-      { label: '출고', this: thisOut, last: lastOut, diff: diff(thisOut, lastOut), up: isUp(thisOut, lastOut) },
-      { label: '반품', this: thisReturn, last: lastReturn, diff: diff(thisReturn, lastReturn), up: !isUp(thisReturn, lastReturn) },
+      { label: '입고', this: thisIn, last: lastIn, diff: diff(thisIn, lastIn), up: thisIn >= lastIn },
+      { label: '출고', this: thisOut, last: lastOut, diff: diff(thisOut, lastOut), up: thisOut >= lastOut },
+      { label: '반품', this: thisReturn, last: lastReturn, diff: diff(thisReturn, lastReturn), up: thisReturn <= lastReturn },
     ]
   }
 
-  // ─── 재고 소진 예상일 (항상 최근 30일 기준, 필터 무관) ────────────────────
   function getDaysUntilStockout() {
     const now = new Date()
     const thirtyDaysAgo = new Date(now)
@@ -178,7 +172,6 @@ export default function Home() {
       .slice(0, 20)
   }
 
-  // ─── 필터 ─────────────────────────────────────────────────────────────────
   const filteredStock = stockData.filter((item) =>
     (searchCode === '' || item.code?.includes(searchCode)) &&
     (searchSellerCode === '' || item.seller_code?.includes(searchSellerCode)) &&
@@ -255,6 +248,8 @@ export default function Home() {
 
   const tabs = [
     { id: 'stock', label: '재고 현황' },
+    { id: 'lowstock', label: `재고 부족 ${lowStockItems}건` },
+    { id: 'pending', label: `미입고 ${totalPending}건` },
     { id: 'in', label: '입고 내역' },
     { id: 'out', label: '출고 내역' },
     { id: 'return', label: '반품 내역' },
@@ -293,13 +288,23 @@ export default function Home() {
   const now = new Date()
   const thisMonthLabel = `${now.getMonth() + 1}월`
   const lastMonthLabel = now.getMonth() === 0 ? '12월' : `${now.getMonth()}월`
-
-  // 차트 제목용 기간 텍스트
   const periodLabel = selectedMonth === 0 ? `${selectedYear}년` : `${selectedYear}년 ${selectedMonth}월`
 
   return (
     <main className="p-8">
-      <h1 className="text-2xl font-bold mb-6">재고 대시보드</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">재고 대시보드</h1>
+        <button
+          onClick={() => {
+            localStorage.removeItem('isLoggedIn')
+            localStorage.removeItem('username')
+            router.push('/login')
+          }}
+          className="text-sm text-gray-500 hover:text-red-500"
+        >
+          로그아웃
+        </button>
+      </div>
 
       {/* 요약 카드 */}
       <div className="grid grid-cols-3 gap-4 mb-8">
@@ -327,7 +332,7 @@ export default function Home() {
         ))}
       </div>
 
-      {/* ── 재고 현황 ─────────────────────────────────────────────────────── */}
+      {/* 재고 현황 */}
       {activeTab === 'stock' && (
         <section>
           {filterUI(true, false)}
@@ -370,7 +375,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* ── 재고 부족 ────────────────────────────────────────────────────── */}
+      {/* 재고 부족 */}
       {activeTab === 'lowstock' && (
         <section>
           {filterUI(true, false)}
@@ -407,7 +412,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* ── 미입고 ───────────────────────────────────────────────────────── */}
+      {/* 미입고 */}
       {activeTab === 'pending' && (
         <section>
           {filterUI(true, true)}
@@ -450,7 +455,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* ── 입고 내역 ─────────────────────────────────────────────────────── */}
+      {/* 입고 내역 */}
       {activeTab === 'in' && (
         <section>
           {filterUI(true, true)}
@@ -493,7 +498,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* ── 출고 내역 ─────────────────────────────────────────────────────── */}
+      {/* 출고 내역 */}
       {activeTab === 'out' && (
         <section>
           {filterUI(false, true)}
@@ -532,7 +537,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* ── 반품 내역 ─────────────────────────────────────────────────────── */}
+      {/* 반품 내역 */}
       {activeTab === 'return' && (
         <section>
           {filterUI(false, true)}
@@ -571,28 +576,19 @@ export default function Home() {
         </section>
       )}
 
-      {/* ── 통계 탭 ───────────────────────────────────────────────────────── */}
+      {/* 통계 */}
       {activeTab === 'chart' && (
         <section>
-
-          {/* ── 공통 연도/월 필터 ────────────────────────────────────────────── */}
           <div className="flex items-center gap-3 mb-8 flex-wrap">
             <span className="text-sm font-medium text-gray-700">기간 선택</span>
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(Number(e.target.value))}
-              className="border border-gray-300 rounded px-3 py-2 text-sm"
-            >
+            <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))}
+              className="border border-gray-300 rounded px-3 py-2 text-sm">
               {availableYears.length === 0
                 ? <option>데이터 없음</option>
-                : availableYears.map((year) => <option key={year} value={year}>{year}년</option>)
-              }
+                : availableYears.map((year) => <option key={year} value={year}>{year}년</option>)}
             </select>
-            <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(Number(e.target.value))}
-              className="border border-gray-300 rounded px-3 py-2 text-sm"
-            >
+            <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))}
+              className="border border-gray-300 rounded px-3 py-2 text-sm">
               <option value={0}>전체</option>
               {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
                 <option key={m} value={m}>{m}월</option>
@@ -600,10 +596,7 @@ export default function Home() {
             </select>
           </div>
 
-          {/* ── 이번 달 vs 지난달 비교 (필터 무관) ──────────────────────────── */}
-          <h2 className="text-lg font-semibold mb-4">
-            이번 달 ({thisMonthLabel}) vs 지난달 ({lastMonthLabel}) 비교
-          </h2>
+          <h2 className="text-lg font-semibold mb-4">이번 달 ({thisMonthLabel}) vs 지난달 ({lastMonthLabel}) 비교</h2>
           <div className="grid grid-cols-3 gap-4 mb-10">
             {monthComparison.map((item) => (
               <div key={item.label} className="border rounded-lg p-4 bg-white shadow-sm">
@@ -617,7 +610,6 @@ export default function Home() {
             ))}
           </div>
 
-          {/* ── 입고/출고/반품 차트 (연도+월 필터 적용) ─────────────────────── */}
           <h2 className="text-lg font-semibold mb-4">{periodLabel} 입고/출고/반품</h2>
           <ResponsiveContainer width="100%" height={350}>
             <BarChart data={getMainChart()} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
@@ -632,7 +624,6 @@ export default function Home() {
             </BarChart>
           </ResponsiveContainer>
 
-          {/* ── 분류 출고 Top10 파이차트 (공통 연도+월 필터 적용) ─────────────── */}
           <h2 className="text-lg font-semibold mt-12 mb-3">
             {selectedCategoryForOut ? `${periodLabel} ${selectedCategoryForOut} 출고 Top 10` : `${periodLabel} 분류 출고 Top 10`}
           </h2>
@@ -666,7 +657,6 @@ export default function Home() {
             })()
           )}
 
-          {/* ── 분류별 재고 회전율 Top10 (공통 연도+월 필터 적용) ────────────── */}
           <h2 className="text-lg font-semibold mt-12 mb-3">
             {selectedCategoryForTurnover ? `${periodLabel} ${selectedCategoryForTurnover} 재고 회전율 Top 10` : `${periodLabel} 분류별 재고 회전율 Top 10`}
           </h2>
@@ -700,7 +690,6 @@ export default function Home() {
             })()
           )}
 
-          {/* ── 재고 소진 예상일 (필터 무관, 항상 최근 30일 기준) ─────────────── */}
           <h2 className="text-lg font-semibold mt-12 mb-2">재고 소진 예상일 (최근 30일 출고 기준)</h2>
           <p className="text-xs text-gray-400 mb-4">※ 최근 30일 평균 일출고량 기준으로 현재 재고가 며칠 뒤 소진되는지 예측합니다.</p>
           <div className="overflow-x-auto">
@@ -740,7 +729,6 @@ export default function Home() {
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 inline-block"></span> 7일 이내 소진</span>
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-yellow-100 inline-block"></span> 30일 이내 소진</span>
           </div>
-
         </section>
       )}
     </main>
