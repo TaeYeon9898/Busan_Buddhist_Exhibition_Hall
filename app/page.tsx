@@ -248,8 +248,6 @@ export default function Home() {
 
   const tabs = [
     { id: 'stock', label: '재고 현황' },
-    { id: 'lowstock', label: `재고 부족 ${lowStockItems}건` },
-    { id: 'pending', label: `미입고 ${totalPending}건` },
     { id: 'in', label: '입고 내역' },
     { id: 'out', label: '출고 내역' },
     { id: 'return', label: '반품 내역' },
@@ -322,7 +320,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 탭 */}
+      {/* 탭 - 재고부족/미입고 탭 없음, 카드 클릭으로만 진입 */}
       <div className="flex flex-wrap border-b border-gray-300 mb-6">
         {tabs.map((tab) => (
           <button key={tab.id} onClick={() => changeTab(tab.id)}
@@ -375,7 +373,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* 재고 부족 */}
+      {/* 재고 부족 (카드 클릭 진입) */}
       {activeTab === 'lowstock' && (
         <section>
           {filterUI(true, false)}
@@ -412,7 +410,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* 미입고 */}
+      {/* 미입고 (카드 클릭 진입) */}
       {activeTab === 'pending' && (
         <section>
           {filterUI(true, true)}
