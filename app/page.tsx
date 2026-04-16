@@ -31,16 +31,30 @@ export default function Home() {
 
   const [selectedCategoryForOut, setSelectedCategoryForOut] = useState('')
   const [selectedCategoryForTurnover, setSelectedCategoryForTurnover] = useState('')
+  const [lastUpdated, setLastUpdated] = useState<Record<string, string>>({})
 
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 50
 
   useEffect(() => {
     const isLoggedIn = localStorage.getItem('isLoggedIn')
-    if (!isLoggedIn) {
+    const loginTime = localStorage.getItem('loginTime')
+
+    if (!isLoggedIn || !loginTime) {
       router.push('/login')
       return
     }
+
+    // 1시간(3600000ms) 지나면 자동 로그아웃
+    const oneHour = 60 * 60 * 1000
+    if (Date.now() - Number(loginTime) > oneHour) {
+      localStorage.removeItem('isLoggedIn')
+      localStorage.removeItem('username')
+      localStorage.removeItem('loginTime')
+      router.push('/login')
+      return
+    }
+
     fetchData()
   }, [])
 
@@ -50,6 +64,19 @@ export default function Home() {
     const { data: outStock } = await supabase.from('out_stock').select('*').order('out_date', { ascending: false })
     const { data: returnStock } = await supabase.from('return_stock').select('*').order('return_date', { ascending: false })
 
+    // 각 테이블의 마지막 created_at 조회
+    const [{ data: lastIn }, { data: lastOut }, { data: lastReturn }] = await Promise.all([
+      supabase.from('in_stock').select('created_at').order('created_at', { ascending: false }).limit(1),
+      supabase.from('out_stock').select('created_at').order('created_at', { ascending: false }).limit(1),
+      supabase.from('return_stock').select('created_at').order('created_at', { ascending: false }).limit(1),
+    ])
+
+    const fmt = (d: any) => {
+      if (!d || d.length === 0) return '-'
+      return new Date(d[0].created_at).toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    }
+
+    setLastUpdated({ in: fmt(lastIn), out: fmt(lastOut), return: fmt(lastReturn) })
     setStockData(stock || [])
     setInData(inStock || [])
     setOutData(outStock || [])
@@ -290,18 +317,26 @@ export default function Home() {
 
   return (
     <main className="p-8">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold">재고 대시보드</h1>
         <button
           onClick={() => {
             localStorage.removeItem('isLoggedIn')
             localStorage.removeItem('username')
+            localStorage.removeItem('loginTime')
             router.push('/login')
           }}
           className="text-sm text-gray-500 hover:text-red-500"
         >
           로그아웃
         </button>
+      </div>
+
+      {/* DB 마지막 업데이트 시간 */}
+      <div className="flex flex-wrap gap-4 mb-6 text-xs text-gray-400">
+        <span>📥 입고 최근 업데이트: <span className="text-gray-600 font-medium">{lastUpdated.in || '-'}</span></span>
+        <span>📤 출고 최근 업데이트: <span className="text-gray-600 font-medium">{lastUpdated.out || '-'}</span></span>
+        <span>🔄 반품 최근 업데이트: <span className="text-gray-600 font-medium">{lastUpdated.return || '-'}</span></span>
       </div>
 
       {/* 요약 카드 */}

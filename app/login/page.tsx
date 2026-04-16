@@ -16,7 +16,6 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
 
-    // username으로만 조회 (password는 DB에서 꺼내서 bcrypt로 비교)
     const { data, error } = await supabase
       .from('users')
       .select('*')
@@ -29,7 +28,6 @@ export default function LoginPage() {
       return
     }
 
-    // 입력한 비밀번호와 해싱된 비밀번호 비교
     const isMatch = await bcrypt.compare(password, data.password)
 
     if (!isMatch) {
@@ -40,6 +38,7 @@ export default function LoginPage() {
 
     localStorage.setItem('isLoggedIn', 'true')
     localStorage.setItem('username', data.username)
+    localStorage.setItem('loginTime', Date.now().toString()) // 로그인 시간 저장
     router.push('/')
   }
 
